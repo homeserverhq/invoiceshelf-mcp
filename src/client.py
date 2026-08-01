@@ -3,6 +3,7 @@ import datetime as dt
 import os
 import re
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -150,6 +151,22 @@ class InvoiceShelfClient:
                 "InvoiceShelf URL required. Set INVOICESHELF_BASE_URL env var "
                 "or pass base_url."
             )
+        self.public_url = os.getenv("INVOICESHELF_PUBLIC_URL", "").rstrip("/") or self.base_url
+        # When a public URL is configured, forward its origin to the backend via
+        # Host / X-Forwarded-Proto so the backend builds links (JSON responses
+        # AND email bodies) with the public-facing origin instead of the internal
+        # Docker host. The backend derives links from the request Host header.
+        self._public_headers: dict[str, str] = {}
+        if self.public_url != self.base_url:
+            try:
+                parts = urlsplit(self.public_url)
+                if parts.netloc:
+                    self._public_headers["Host"] = parts.netloc
+                    self._public_headers["X-Forwarded-Proto"] = (parts.scheme or "http").lower()
+                    if parts.port:
+                        self._public_headers["X-Forwarded-Port"] = str(parts.port)
+            except ValueError:
+                self._public_headers = {}
         self._currencies_by_id: dict[int, dict] = {}
         self._currency_seeding: bool = False
         self._bootstrap_seeded: bool = False
@@ -164,6 +181,7 @@ class InvoiceShelfClient:
     async def request(self, method: str, path: str, api_key: Optional[str] = None, keep_roles: bool = False, convert_money: bool = True, **kwargs: Any) -> Any:
         url = f"{self.base_url}{path}"
         headers = self._get_headers(api_key)
+        headers.update(self._public_headers)
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.request(method, url, headers=headers, **kwargs)
             if response.status_code >= 400:
@@ -183,6 +201,7 @@ class InvoiceShelfClient:
                     self._inbound_money_convert(data, self._company_default_precision)
                 if not keep_roles:
                     data = _strip_roles(data)
+                data = self._rewrite_public_urls(data)
                 return data
             return {"text": response.text}
 
@@ -219,6 +238,18 @@ class InvoiceShelfClient:
             await self._ensure_company_currency(api_key)
             self._outbound_money_convert(result, self._company_default_precision)
         return result
+
+    def _rewrite_public_urls(self, data: Any) -> Any:
+        """Rewrite any client-facing URL built on the internal base origin to the public URL."""
+        if self.public_url == self.base_url:
+            return data
+        if isinstance(data, dict):
+            return {k: self._rewrite_public_urls(v) for k, v in data.items()}
+        if isinstance(data, list):
+            return [self._rewrite_public_urls(item) for item in data]
+        if isinstance(data, str) and self.base_url in data:
+            return data.replace(self.base_url, self.public_url)
+        return data
 
     # =========================================================================
     # Currency-aware money conversion (used by request())

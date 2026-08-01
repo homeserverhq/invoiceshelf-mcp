@@ -89,6 +89,9 @@ MCP_URL = f"http://localhost:{MCP_SERVER_PORT}/mcp"
 TEST_EMAIL_TO = "solo@selfhostingbox.com"
 TEST_EMAIL_FROM = "no-reply@selfhostingbox.com"
 
+PUBLIC_URL = os.environ.get("INVOICESHELF_PUBLIC_URL", "").rstrip("/") or "http://invoiceshelf.selfhostingbox.com"
+INTERNAL_URL_MARKERS = ("invoiceshelf-app", "localhost:4584", "127.0.0.1:4584")
+
 MCP_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 rid = os.urandom(4).hex()
@@ -494,6 +497,90 @@ def _assert_html(data: Any) -> str | None:
         return f"Expected dict response, got {type(data).__name__}"
     if "html" not in data or not isinstance(data.get("html"), str):
         return f"Expected 'html' string, got {data!r}"
+    return None
+
+
+def _assert_no_internal_urls(data: Any) -> str | None:
+    """Fail if any string in the response references the internal Docker host."""
+    found: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for it in node:
+                walk(it)
+        elif isinstance(node, str):
+            for marker in INTERNAL_URL_MARKERS:
+                if marker in node:
+                    found.append(node[:160])
+                    break
+
+    walk(data)
+    if found:
+        return f"Internal URL leaked to client: {found[0]!r}"
+    return None
+
+
+def _assert_public_invoice(data: Any) -> str | None:
+    """Invoice records must carry a public invoice_pdf_url and no internal URLs."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    err = _assert_no_internal_urls(data)
+    if err:
+        return err
+    url = data.get("invoice_pdf_url")
+    if not isinstance(url, str) or not url:
+        return f"Missing invoice_pdf_url in {data!r}"
+    if not url.startswith(PUBLIC_URL):
+        return f"invoice_pdf_url {url!r} does not start with public base {PUBLIC_URL!r}"
+    return None
+
+
+def _assert_dashboard_public(data: Any) -> str | None:
+    """Dashboard must not leak internal URLs; any invoicePdfUrl must be public."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    err = _assert_no_internal_urls(data)
+    if err:
+        return err
+    rdi = data.get("recent_due_invoices")
+    if isinstance(rdi, list):
+        for inv in rdi:
+            if isinstance(inv, dict):
+                u = inv.get("invoicePdfUrl")
+                if isinstance(u, str) and u and not u.startswith(PUBLIC_URL):
+                    return f"dashboard invoicePdfUrl {u!r} not public ({PUBLIC_URL!r})"
+    return None
+
+
+def _assert_search_public(data: Any) -> str | None:
+    """Search paginators must use the public base, never the internal host."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    err = _assert_no_internal_urls(data)
+    if err:
+        return err
+    for group in ("customers", "users"):
+        g = data.get(group)
+        if isinstance(g, dict):
+            p = g.get("path")
+            if isinstance(p, str) and p and not p.startswith(PUBLIC_URL):
+                return f"search {group}.path {p!r} not public ({PUBLIC_URL!r})"
+    return None
+
+
+def _assert_preview_public(data: Any) -> str | None:
+    """Email preview HTML must not contain internal URLs."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    html = data.get("html")
+    if not isinstance(html, str):
+        return f"Expected 'html' string, got {data!r}"
+    err = _assert_no_internal_urls(html)
+    if err:
+        return err
     return None
 
 
@@ -1389,6 +1476,68 @@ async def main():
         else:
             log("  SKIP Phase 4c: no customer_fixture available")
 
+        # ------------------------------------------------------------------
+        # Phase 4e: Public URL Rewriting (INVOICESHELF_PUBLIC_URL)
+        # ------------------------------------------------------------------
+        log("\n=== Phase 4e: Public URL Rewriting ===")
+
+        h1_inv = await run_test(session, "H1 create_invoice public pdf url",
+            "create_invoice", {
+                "customer_id": cust_id, "invoice_number": make_name("PUB"),
+                "invoice_date": "2026-01-15", "template_name": "invoice1",
+                "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 20}]},
+            },
+            assert_fn=_assert_not_empty)
+        h1_id = _int_id(_dict_id(h1_inv))
+        if h1_id:
+            IDS["id_public_inv"] = h1_id
+            pdf_url = h1_inv.get("invoice_pdf_url") if isinstance(h1_inv, dict) else None
+            if not isinstance(pdf_url, str) or not pdf_url:
+                results.append({"label": "H1 create_invoice pdf url present", "tool": "create_invoice",
+                    "status": "FAILED", "reason": "create_invoice response missing invoice_pdf_url"})
+                log(f"  FAIL H1 create_invoice pdf url present: {pdf_url!r}")
+            elif not pdf_url.startswith(PUBLIC_URL):
+                results.append({"label": "H1 create_invoice pdf url present", "tool": "create_invoice",
+                    "status": "FAILED", "reason": f"invoice_pdf_url {pdf_url!r} not public ({PUBLIC_URL!r})"})
+                log(f"  FAIL H1 create_invoice pdf url present: {pdf_url}")
+            else:
+                results.append({"label": "H1 create_invoice pdf url present", "tool": "create_invoice",
+                    "status": "PASSED"})
+                log(f"  PASS H1 create_invoice pdf url present: {pdf_url}")
+            await run_test(session, "H1 get_invoice_by_id public pdf url",
+                "get_invoice_by_id", {"id": h1_id, "include_all_fields": True},
+                assert_fn=_assert_public_invoice)
+        else:
+            log("  SKIP H1: create_invoice returned no id")
+
+        await run_test(session, "H2 dashboard no internal urls",
+            "get_dashboard", {}, assert_fn=_assert_dashboard_public)
+
+        await run_test(session, "H3 search public paginator",
+            "search_customers_and_users", {"search": "Han"}, assert_fn=_assert_search_public)
+
+        await run_test(session, "H3 bootstrap no internal urls",
+            "get_bootstrap", {}, assert_fn=_assert_no_internal_urls)
+
+        if IDS.get("id_inv_preview"):
+            await run_test(session, "H4 invoice preview no internal urls",
+                "get_invoice_send_preview",
+                {"id": IDS["id_inv_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
+                 "subject": f"{rid}-Public", "body": "public url check"},
+                assert_fn=_assert_preview_public)
+        if IDS.get("id_est_preview"):
+            await run_test(session, "H4 estimate preview no internal urls",
+                "get_estimate_send_preview",
+                {"id": IDS["id_est_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
+                 "subject": f"{rid}-Public", "body": "public url check"},
+                assert_fn=_assert_preview_public)
+        if IDS.get("id_pay_preview"):
+            await run_test(session, "H4 payment preview no internal urls",
+                "get_payment_send_preview",
+                {"id": IDS["id_pay_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
+                 "subject": f"{rid}-Public", "body": "public url check"},
+                assert_fn=_assert_preview_public)
+
         # Static conformance guard
         log("\n=== Static Conformance Guard ===")
         guard_failures = static_conformance_guard()
@@ -1429,6 +1578,7 @@ async def main():
             ("id_money_expense", "delete_expenses_by_id"),
             ("id_money_exp_jpy", "delete_expenses_by_id"),
             ("id_money_exp_kwd", "delete_expenses_by_id"),
+            ("id_public_inv", "delete_invoices_by_id"),
         ]:
             await session.call_tool(dtool, {"id": IDS[id_key]})
             log(f"  CLEANUP {id_key} id={IDS[id_key]}")

@@ -21,7 +21,7 @@ and relationship management.
   and maximize context window efficiency.
 - **⚡ Efficient Gets** — GET responses return only commonly used fields by
   default. Full objects are available via an `include_all_fields` flag.
-- **🧪 Comprehensive Testing** — 199 automated tests covering all tool
+- **🧪 Comprehensive Testing** — 208 automated tests covering all tool
   domains, run via the test runner pipeline.
 
 ## 🔧 Environment Variables
@@ -32,6 +32,7 @@ and relationship management.
 | `MCP_SERVER_PORT` | Yes | Port number the MCP server listens on |
 | `ALLOW_ALL_AGGREGATE` | No | When `true`, aggregate listing tools honor the `include_all_fields` parameter. When `false` (default), the parameter is silently forced to `False` for aggregate list operations. |
 | `IS_STATEFUL` | No | When `true`, uses stateful Streamable HTTP with session tracking. When `false` (default), uses stateless mode. |
+| `INVOICESHELF_PUBLIC_URL` | No | Public-facing URL to replace internal Docker URLs in responses. Defaults to `INVOICESHELF_BASE_URL` if not set. |
 
 ## 📦 Installation & Local Development
 
@@ -43,6 +44,7 @@ and relationship management.
 3. Run the server:
     ```bash
     export INVOICESHELF_BASE_URL=http://localhost:8080
+    export INVOICESHELF_PUBLIC_URL=https://invoiceshelf.example.com
     export MCP_SERVER_PORT=80
     python -m src.main
     ```
@@ -55,6 +57,7 @@ Build and run the server using Docker:
 docker build -t invoiceshelf-mcp:latest .
 docker run -d --name invoiceshelf-mcp \
     -e INVOICESHELF_BASE_URL="http://invoiceshelf-app:8080" \
+    -e INVOICESHELF_PUBLIC_URL="https://invoiceshelf.example.com" \
     -e MCP_SERVER_PORT=80 \
     invoiceshelf-mcp:latest
 
