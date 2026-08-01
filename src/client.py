@@ -1,0 +1,670 @@
+import datetime as dt
+import os
+import re
+from typing import Any, Optional
+
+import httpx
+
+
+COMMON_FIELDS: dict[str, set[str]] = {
+    "customer": {"id", "name", "email", "currency_id", "phone"},
+    "item": {"id", "name", "price", "unit_id", "currency_id"},
+    "unit": {"id", "name"},
+    "invoice": {"id", "invoice_number", "customer_id", "status", "paid_status", "total"},
+    "estimate": {"id", "estimate_number", "customer_id", "status", "total"},
+    "expense": {"id", "expense_date", "amount", "expense_category_id", "customer_id"},
+    "expense_category": {"id", "name", "description", "company_id"},
+    "payment": {"id", "payment_number", "customer_id", "invoice_id", "amount", "payment_date"},
+    "payment_method": {"id", "name", "type"},
+    "custom_field": {"id", "name", "label", "model_type", "type"},
+    "tax_type": {"id", "name", "calculation_type", "percent"},
+    "note": {"id", "name", "type", "is_default"},
+    "role": {"id", "name", "title"},
+    "recurring_invoice": {"id", "customer_id", "frequency", "status", "total"},
+    "company": {"id", "name", "slug", "owner_id"},
+}
+
+PREFIX = "/api/v1"
+
+
+def _filter_fields(data: Any, common_set: set[str]) -> Any:
+    if isinstance(data, dict):
+        return {k: v for k, v in data.items() if k in common_set}
+    if isinstance(data, list):
+        return [_filter_fields(item, common_set) for item in data]
+    return data
+
+
+def _normalize_datetime(value: str) -> str:
+    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$', value):
+        parsed = dt.datetime.fromisoformat(value)
+        parsed = parsed.astimezone(dt.timezone.utc)
+        return parsed.strftime('%Y-%m-%d')
+    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value):
+        raise ValueError(
+            f"Invalid datetime: {value}. Timezone offset is required. "
+            "Must use format: 2026-06-22T15:00:00-04:00"
+        )
+    return value
+
+
+def _denormalize_datetime(value: str) -> str:
+    if re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', value):
+        parsed = dt.datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return parsed.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+    return value
+
+
+def _denormalize_response(data: Any) -> Any:
+    if isinstance(data, dict):
+        return {k: _denormalize_response(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_denormalize_response(item) for item in data]
+    if isinstance(data, str):
+        return _denormalize_datetime(data)
+    return data
+
+
+class InvoiceShelfClient:
+
+    def __init__(self, base_url: Optional[str] = None):
+        self.base_url = (base_url or os.getenv("INVOICESHELF_BASE_URL", "")).rstrip("/")
+        if not self.base_url:
+            raise ValueError(
+                "InvoiceShelf URL required. Set INVOICESHELF_BASE_URL env var "
+                "or pass base_url."
+            )
+
+    def _get_headers(self, api_key: Optional[str] = None) -> dict[str, str]:
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
+
+    async def request(self, method: str, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+        url = f"{self.base_url}{path}"
+        headers = self._get_headers(api_key)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.request(method, url, headers=headers, **kwargs)
+            if response.status_code >= 400:
+                body = response.text[:500]
+                raise httpx.HTTPStatusError(
+                    f"{response.status_code} {response.reason_phrase} for {method} {path}: {body}",
+                    request=response.request, response=response,
+                )
+            if response.status_code == 204:
+                return {}
+            if response.headers.get("content-type", "").startswith("application/json"):
+                return response.json()
+            return {"text": response.text}
+
+    async def get(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+        return await self.request("GET", path, api_key, **kwargs)
+
+    async def post(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+        return await self.request("POST", path, api_key, **kwargs)
+
+    async def put(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+        return await self.request("PUT", path, api_key, **kwargs)
+
+    async def delete(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+        return await self.request("DELETE", path, api_key, **kwargs)
+
+    def _unwrap(self, data: Any) -> Any:
+        if isinstance(data, dict) and "data" in data:
+            return data["data"]
+        return data
+
+    def _apply(self, data: Any, api_key: Optional[str] = None, include_all_fields: bool = False, resource_key: str = "") -> Any:
+        result = self._unwrap(data)
+        if not include_all_fields and resource_key:
+            result = _filter_fields(result, COMMON_FIELDS[resource_key])
+        return _denormalize_response(result)
+
+    def _normalize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            k: _normalize_datetime(v) if isinstance(v, str) else v
+            for k, v in payload.items()
+        }
+
+    # =========================================================================
+    # Customers
+    # =========================================================================
+
+    async def list_all_customers(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/customers", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "customer")
+
+    async def get_customer_by_id(self, customer_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/customers/{customer_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "customer")
+
+    async def create_customer(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/customers", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "customer")
+
+    async def update_customer(self, customer_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/customers/{customer_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "customer")
+
+    async def delete_customers(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/customers/delete", api_key, json={"ids": ids})
+
+    async def get_customer_stats(self, customer_id: int, api_key: Optional[str] = None, previous_year: bool = False) -> Any:
+        params = {"previous_year": "true" if previous_year else "false"}
+        data = await self.get(f"{PREFIX}/customers/{customer_id}/stats", api_key, params=params)
+        return self._unwrap(data)
+
+    # =========================================================================
+    # Items
+    # =========================================================================
+
+    async def list_all_items(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/items", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "item")
+
+    async def get_item_by_id(self, item_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/items/{item_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "item")
+
+    async def create_item(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/items", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "item")
+
+    async def update_item(self, item_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/items/{item_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "item")
+
+    async def delete_items(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/items/delete", api_key, json={"ids": ids})
+
+    # =========================================================================
+    # Units
+    # =========================================================================
+
+    async def list_all_units(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/units", api_key)
+        return self._apply(data, api_key, include_all_fields, "unit")
+
+    async def get_unit_by_id(self, unit_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/units/{unit_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "unit")
+
+    async def create_unit(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/units", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "unit")
+
+    async def update_unit(self, unit_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/units/{unit_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "unit")
+
+    async def delete_unit_by_id(self, unit_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/units/{unit_id}", api_key)
+
+    # =========================================================================
+    # Invoices
+    # =========================================================================
+
+    async def list_all_invoices(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/invoices", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def get_invoice_by_id(self, invoice_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/invoices/{invoice_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def create_invoice(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/invoices", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def update_invoice(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/invoices/{invoice_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def delete_invoices(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/invoices/delete", api_key, json={"ids": ids})
+
+    async def send_invoice(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        data = await self.post(f"{PREFIX}/invoices/{invoice_id}/send", api_key, json=payload)
+        return self._unwrap(data)
+
+    async def clone_invoice(self, invoice_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/invoices/{invoice_id}/clone", api_key)
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def change_invoice_status(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        data = await self.post(f"{PREFIX}/invoices/{invoice_id}/status", api_key, json=payload)
+        return self._unwrap(data)
+
+    async def list_invoice_templates(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/invoices/templates", api_key)
+        return self._unwrap(data)
+
+    async def get_invoice_send_preview(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        params = {k: v for k, v in payload.items() if v}
+        data = await self.get(f"{PREFIX}/invoices/{invoice_id}/send/preview", api_key, params=params)
+        return {"html": data.get("text", "") if isinstance(data, dict) else str(data)}
+
+    # =========================================================================
+    # Estimates
+    # =========================================================================
+
+    async def list_all_estimates(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/estimates", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "estimate")
+
+    async def get_estimate_by_id(self, estimate_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/estimates/{estimate_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "estimate")
+
+    async def create_estimate(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/estimates", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "estimate")
+
+    async def update_estimate(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/estimates/{estimate_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "estimate")
+
+    async def delete_estimates(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/estimates/delete", api_key, json={"ids": ids})
+
+    async def send_estimate(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        data = await self.post(f"{PREFIX}/estimates/{estimate_id}/send", api_key, json=payload)
+        return self._unwrap(data)
+
+    async def clone_estimate(self, estimate_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/estimates/{estimate_id}/clone", api_key)
+        return self._apply(data, api_key, include_all_fields, "estimate")
+
+    async def change_estimate_status(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        data = await self.post(f"{PREFIX}/estimates/{estimate_id}/status", api_key, json=payload)
+        return self._unwrap(data)
+
+    async def convert_estimate_to_invoice(self, estimate_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/estimates/{estimate_id}/convert-to-invoice", api_key)
+        return self._apply(data, api_key, include_all_fields, "invoice")
+
+    async def list_estimate_templates(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/estimates/templates", api_key)
+        return self._unwrap(data)
+
+    async def get_estimate_send_preview(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        params = {k: v for k, v in payload.items() if v}
+        data = await self.get(f"{PREFIX}/estimates/{estimate_id}/send/preview", api_key, params=params)
+        return {"html": data.get("text", "") if isinstance(data, dict) else str(data)}
+
+    # =========================================================================
+    # Expenses
+    # =========================================================================
+
+    async def list_all_expenses(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/expenses", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "expense")
+
+    async def get_expense_by_id(self, expense_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/expenses/{expense_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "expense")
+
+    async def create_expense(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/expenses", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "expense")
+
+    async def update_expense(self, expense_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/expenses/{expense_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "expense")
+
+    async def delete_expenses(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/expenses/delete", api_key, json={"ids": ids})
+
+    async def duplicate_expense(self, expense_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/expenses/{expense_id}/duplicate", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "expense")
+
+    # =========================================================================
+    # Expense Categories
+    # =========================================================================
+
+    async def list_all_expense_categories(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/categories", api_key)
+        return self._apply(data, api_key, include_all_fields, "expense_category")
+
+    async def get_expense_category_by_id(self, category_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/categories/{category_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "expense_category")
+
+    async def create_expense_category(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/categories", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "expense_category")
+
+    async def update_expense_category(self, category_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/categories/{category_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "expense_category")
+
+    async def delete_expense_category_by_id(self, category_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/categories/{category_id}", api_key)
+
+    # =========================================================================
+    # Payments
+    # =========================================================================
+
+    async def list_all_payments(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/payments", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "payment")
+
+    async def get_payment_by_id(self, payment_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/payments/{payment_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "payment")
+
+    async def create_payment(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/payments", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "payment")
+
+    async def update_payment(self, payment_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/payments/{payment_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "payment")
+
+    async def delete_payments(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/payments/delete", api_key, json={"ids": ids})
+
+    async def send_payment(self, payment_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        data = await self.post(f"{PREFIX}/payments/{payment_id}/send", api_key, json=payload)
+        return self._unwrap(data)
+
+    async def get_payment_send_preview(self, payment_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
+        params = {k: v for k, v in payload.items() if v}
+        data = await self.get(f"{PREFIX}/payments/{payment_id}/send/preview", api_key, params=params)
+        return {"html": data.get("text", "") if isinstance(data, dict) else str(data)}
+
+    # =========================================================================
+    # Payment Methods
+    # =========================================================================
+
+    async def list_all_payment_methods(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/payment-methods", api_key)
+        return self._apply(data, api_key, include_all_fields, "payment_method")
+
+    async def get_payment_method_by_id(self, method_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/payment-methods/{method_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "payment_method")
+
+    async def create_payment_method(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/payment-methods", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "payment_method")
+
+    async def update_payment_method(self, method_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/payment-methods/{method_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "payment_method")
+
+    async def delete_payment_method_by_id(self, method_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/payment-methods/{method_id}", api_key)
+
+    # =========================================================================
+    # Custom Fields
+    # =========================================================================
+
+    async def list_all_custom_fields(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/custom-fields", api_key)
+        return self._apply(data, api_key, include_all_fields, "custom_field")
+
+    async def get_custom_field_by_id(self, field_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/custom-fields/{field_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "custom_field")
+
+    async def create_custom_field(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/custom-fields", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "custom_field")
+
+    async def update_custom_field(self, field_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/custom-fields/{field_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "custom_field")
+
+    async def delete_custom_field_by_id(self, field_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/custom-fields/{field_id}", api_key)
+
+    # =========================================================================
+    # Tax Types
+    # =========================================================================
+
+    async def list_all_tax_types(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/tax-types", api_key)
+        return self._apply(data, api_key, include_all_fields, "tax_type")
+
+    async def get_tax_type_by_id(self, tax_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/tax-types/{tax_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "tax_type")
+
+    async def create_tax_type(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/tax-types", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "tax_type")
+
+    async def update_tax_type(self, tax_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/tax-types/{tax_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "tax_type")
+
+    async def delete_tax_type_by_id(self, tax_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/tax-types/{tax_id}", api_key)
+
+    # =========================================================================
+    # Notes
+    # =========================================================================
+
+    async def list_all_notes(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/notes", api_key)
+        return self._apply(data, api_key, include_all_fields, "note")
+
+    async def get_note_by_id(self, note_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/notes/{note_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "note")
+
+    async def create_note(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/notes", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "note")
+
+    async def update_note(self, note_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/notes/{note_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "note")
+
+    async def delete_note_by_id(self, note_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/notes/{note_id}", api_key)
+
+    # =========================================================================
+    # Recurring Invoices
+    # =========================================================================
+
+    async def list_all_recurring_invoices(self, api_key: Optional[str] = None, include_all_fields: bool = False, page: int = 0, page_size: int = 10) -> Any:
+        params = {}
+        if page_size > 0:
+            params["limit"] = str(page_size)
+            params["page"] = str(page if page and page > 0 else 1)
+        else:
+            params["limit"] = "all"
+        data = await self.get(f"{PREFIX}/recurring-invoices", api_key, params=params or None)
+        return self._apply(data, api_key, include_all_fields, "recurring_invoice")
+
+    async def get_recurring_invoice_by_id(self, ri_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/recurring-invoices/{ri_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "recurring_invoice")
+
+    async def create_recurring_invoice(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/recurring-invoices", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "recurring_invoice")
+
+    async def update_recurring_invoice(self, ri_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/recurring-invoices/{ri_id}", api_key, json=self._normalize_payload(payload))
+        return self._apply(data, api_key, include_all_fields, "recurring_invoice")
+
+    async def delete_recurring_invoices(self, ids: list[int], api_key: Optional[str] = None) -> Any:
+        return await self.post(f"{PREFIX}/recurring-invoices/delete", api_key, json={"ids": ids})
+
+    # =========================================================================
+    # Roles
+    # =========================================================================
+
+    async def list_all_roles(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/roles", api_key)
+        return self._apply(data, api_key, include_all_fields, "role")
+
+    async def get_role_by_id(self, role_id: int, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/roles/{role_id}", api_key)
+        return self._apply(data, api_key, include_all_fields, "role")
+
+    async def create_role(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.post(f"{PREFIX}/roles", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "role")
+
+    async def update_role(self, role_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.put(f"{PREFIX}/roles/{role_id}", api_key, json=payload)
+        return self._apply(data, api_key, include_all_fields, "role")
+
+    async def delete_role_by_id(self, role_id: int, api_key: Optional[str] = None) -> Any:
+        return await self.delete(f"{PREFIX}/roles/{role_id}", api_key)
+
+    # =========================================================================
+    # Domain / Read Tools
+    # =========================================================================
+
+    async def check_server_status(self, api_key: Optional[str] = None) -> Any:
+        ping = await self.get("/api/ping", api_key)
+        try:
+            ver = await self.get(f"{PREFIX}/app/version", api_key)
+            return {**ping, **ver}
+        except Exception:
+            return ping
+
+    async def get_dashboard(self, api_key: Optional[str] = None, previous_year: bool = False) -> Any:
+        params = {"previous_year": "true" if previous_year else "false"}
+        data = await self.get(f"{PREFIX}/dashboard", api_key, params=params)
+        return self._unwrap(data)
+
+    async def get_bootstrap(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/bootstrap", api_key)
+        return self._unwrap(data)
+
+    async def search_customers_and_users(self, api_key: Optional[str] = None, search: str = "") -> Any:
+        params = {"search": search} if search else None
+        data = await self.get(f"{PREFIX}/search", api_key, params=params)
+        return self._unwrap(data)
+
+    async def search_users(self, api_key: Optional[str] = None, email: str = "") -> Any:
+        params = {"email": email} if email else None
+        data = await self.get(f"{PREFIX}/search/user", api_key, params=params)
+        return self._unwrap(data)
+
+    async def list_all_currencies(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/currencies", api_key)
+        result = self._unwrap(data)
+        if not include_all_fields:
+            result = _filter_fields(result, COMMON_FIELDS.get("currency", {"id", "name", "code"}))
+        return _denormalize_response(result)
+
+    async def list_used_currencies(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/currencies/used", api_key)
+        return self._unwrap(data)
+
+    async def list_all_countries(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/countries", api_key)
+        result = self._unwrap(data)
+        if not include_all_fields:
+            result = _filter_fields(result, {"id", "name", "code"})
+        return _denormalize_response(result)
+
+    async def list_timezones(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/timezones", api_key)
+        return self._unwrap(data)
+
+    async def list_date_formats(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/date/formats", api_key)
+        return self._unwrap(data)
+
+    async def list_time_formats(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/time/formats", api_key)
+        return self._unwrap(data)
+
+    async def get_next_number(self, api_key: Optional[str] = None, key: str = "", user_id: str = "", model_id: str = "") -> Any:
+        params = {"key": key}
+        if user_id:
+            params["user_id"] = user_id
+        if model_id:
+            params["model_id"] = model_id
+        data = await self.get(f"{PREFIX}/next-number", api_key, params=params)
+        return self._unwrap(data)
+
+    async def get_number_placeholders(self, api_key: Optional[str] = None, format_str: str = "") -> Any:
+        params = {"format": format_str} if format_str else None
+        data = await self.get(f"{PREFIX}/number-placeholders", api_key, params=params)
+        return self._unwrap(data)
+
+    async def get_current_company(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/current-company", api_key)
+        return self._unwrap(data)
+
+    async def list_all_companies(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
+        data = await self.get(f"{PREFIX}/companies", api_key)
+        result = self._unwrap(data)
+        if not include_all_fields:
+            result = _filter_fields(result, COMMON_FIELDS["company"])
+        return _denormalize_response(result)
+
+    async def list_abilities(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/abilities", api_key)
+        return self._unwrap(data)
+
+    async def get_recurring_invoice_frequency(self, api_key: Optional[str] = None, frequency: str = "", starts_at: str = "") -> Any:
+        params = {"frequency": frequency, "starts_at": _normalize_datetime(starts_at) if starts_at else starts_at}
+        data = await self.get(f"{PREFIX}/recurring-invoice-frequency", api_key, params=params)
+        return self._unwrap(data)
+
+    async def get_exchange_rate(self, currency_id: int, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/currencies/{currency_id}/exchange-rate", api_key)
+        return self._unwrap(data)
+
+    async def get_active_exchange_rate_provider(self, currency_id: int, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/currencies/{currency_id}/active-provider", api_key)
+        return self._unwrap(data)
+
+    async def list_used_currencies_for_exchange(self, api_key: Optional[str] = None, provider_id: str = "") -> Any:
+        params = {"provider_id": provider_id} if provider_id else None
+        data = await self.get(f"{PREFIX}/used-currencies", api_key, params=params)
+        return self._unwrap(data)
+
+    async def list_supported_currencies(self, api_key: Optional[str] = None, driver: str = "", key: str = "") -> Any:
+        params = {"driver": driver, "key": key}
+        data = await self.get(f"{PREFIX}/supported-currencies", api_key, params=params)
+        return self._unwrap(data)
