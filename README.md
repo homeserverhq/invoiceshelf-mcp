@@ -81,51 +81,6 @@ The MCP server serves at `http://invoiceshelf-mcp:80/mcp`
 The server implements 106 MCP tools organized into the following
 categories:
 
-### 🌐 Domain (21 tools)
-- `check_server_status` — Check connectivity to the InvoiceShelf backend
-- `get_dashboard` — Get dashboard data
-- `get_bootstrap` — Get application bootstrap data
-- `search_customers_and_users` — Search across customers and users
-- `search_users` — Search users by email
-- `list_all_currencies` — List all currencies
-- `list_used_currencies` — List currencies in use
-- `list_all_countries` — List all countries
-- `list_timezones` — List available timezones
-- `list_date_formats` — List available date formats
-- `list_time_formats` — List available time formats
-- `get_next_number` — Get the next number for a resource
-- `get_number_placeholders` — Get number placeholders for a format
-- `get_current_company` — Get the current company
-- `list_all_companies` — List all companies
-- `list_abilities` — List all available abilities
-- `get_recurring_invoice_frequency` — Get the next occurrence for a recurring frequency
-- `get_exchange_rate` — Get an exchange rate for a currency
-- `get_active_exchange_rate_provider` — Get the active exchange-rate provider
-- `list_used_currencies_for_exchange` — List currencies used for exchange
-- `list_supported_currencies` — List currencies supported by an exchange-rate provider
-
-### 👥 Customers (6 tools)
-- `list_all_customers` — List all customer records
-- `get_customer_by_id` — Get a single customer by ID
-- `create_customer` — Create a new customer
-- `update_customer` — Update an existing customer
-- `delete_customers_by_id` — Delete a customer by ID
-- `get_customer_stats` — Get statistics for a single customer
-
-### 📦 Items (5 tools)
-- `list_all_items` — List all item records
-- `get_item_by_id` — Get a single item by ID
-- `create_item` — Create a new item
-- `update_item` — Update an existing item
-- `delete_items_by_id` — Delete an item by ID
-
-### 📏 Units (5 tools)
-- `list_all_units` — List all unit records
-- `get_unit_by_id` — Get a single unit by ID
-- `create_unit` — Create a new unit
-- `update_unit` — Update an existing unit
-- `delete_unit_by_id` — Delete a unit by ID
-
 ### 🧾 Invoices (10 tools)
 - `list_all_invoices` — List all invoice records
 - `get_invoice_by_id` — Get a single invoice by ID
@@ -151,20 +106,34 @@ categories:
 - `list_estimate_templates` — List available estimate templates
 - `get_estimate_send_preview` — Get an estimate send preview
 
-### 💸 Expenses (6 tools)
-- `list_all_expenses` — List all expense records
-- `get_expense_by_id` — Get a single expense by ID
-- `create_expense` — Create a new expense
-- `update_expense` — Update an existing expense
-- `delete_expenses_by_id` — Delete an expense by ID
-- `duplicate_expense` — Duplicate an existing expense
+### 👥 Customers (6 tools)
+- `list_all_customers` — List all customer records
+- `get_customer_by_id` — Get a single customer by ID
+- `create_customer` — Create a new customer
+- `update_customer` — Update an existing customer
+- `delete_customers_by_id` — Delete a customer by ID
+- `get_customer_stats` — Get statistics for a single customer
 
-### 🗂️ Expense Categories (5 tools)
-- `list_all_expense_categories` — List all expense category records
-- `get_expense_category_by_id` — Get a single expense category by ID
-- `create_expense_category` — Create a new expense category
-- `update_expense_category` — Update an existing expense category
-- `delete_expense_category_by_id` — Delete an expense category by ID
+### 📦 Items (5 tools)
+- `list_all_items` — List all item records
+- `get_item_by_id` — Get a single item by ID
+- `create_item` — Create a new item
+- `update_item` — Update an existing item
+- `delete_items_by_id` — Delete an item by ID
+
+### 📏 Units (5 tools)
+- `list_all_units` — List all unit records
+- `get_unit_by_id` — Get a single unit by ID
+- `create_unit` — Create a new unit
+- `update_unit` — Update an existing unit
+- `delete_unit_by_id` — Delete a unit by ID
+
+### 🔁 Recurring Invoices (5 tools)
+- `list_all_recurring_invoices` — List all recurring invoice records
+- `get_recurring_invoice_by_id` — Get a single recurring invoice by ID
+- `create_recurring_invoice` — Create a new recurring invoice
+- `update_recurring_invoice` — Update an existing recurring invoice
+- `delete_recurring_invoices_by_id` — Delete a recurring invoice by ID
 
 ### 💳 Payments (7 tools)
 - `list_all_payments` — List all payment records
@@ -182,12 +151,20 @@ categories:
 - `update_payment_method` — Update an existing payment method
 - `delete_payment_method_by_id` — Delete a payment method by ID
 
-### 🏷️ Custom Fields (5 tools)
-- `list_all_custom_fields` — List all custom field records
-- `get_custom_field_by_id` — Get a single custom field by ID
-- `create_custom_field` — Create a new custom field
-- `update_custom_field` — Update an existing custom field
-- `delete_custom_field_by_id` — Delete a custom field by ID
+### 💸 Expenses (6 tools)
+- `list_all_expenses` — List all expense records
+- `get_expense_by_id` — Get a single expense by ID
+- `create_expense` — Create a new expense
+- `update_expense` — Update an existing expense
+- `delete_expenses_by_id` — Delete an expense by ID
+- `duplicate_expense` — Duplicate an existing expense
+
+### 🗂️ Expense Categories (5 tools)
+- `list_all_expense_categories` — List all expense category records
+- `get_expense_category_by_id` — Get a single expense category by ID
+- `create_expense_category` — Create a new expense category
+- `update_expense_category` — Update an existing expense category
+- `delete_expense_category_by_id` — Delete an expense category by ID
 
 ### 🧮 Tax Types (5 tools)
 - `list_all_tax_types` — List all tax type records
@@ -203,12 +180,12 @@ categories:
 - `update_note` — Update an existing note
 - `delete_note_by_id` — Delete a note by ID
 
-### 🔁 Recurring Invoices (5 tools)
-- `list_all_recurring_invoices` — List all recurring invoice records
-- `get_recurring_invoice_by_id` — Get a single recurring invoice by ID
-- `create_recurring_invoice` — Create a new recurring invoice
-- `update_recurring_invoice` — Update an existing recurring invoice
-- `delete_recurring_invoices_by_id` — Delete a recurring invoice by ID
+### 🏷️ Custom Fields (5 tools)
+- `list_all_custom_fields` — List all custom field records
+- `get_custom_field_by_id` — Get a single custom field by ID
+- `create_custom_field` — Create a new custom field
+- `update_custom_field` — Update an existing custom field
+- `delete_custom_field_by_id` — Delete a custom field by ID
 
 ### 🛡️ Roles (5 tools)
 - `list_all_roles` — List all role records
@@ -216,3 +193,26 @@ categories:
 - `create_role` — Create a new role
 - `update_role` — Update an existing role
 - `delete_role_by_id` — Delete a role by ID
+
+### 🌐 Domain (21 tools)
+- `check_server_status` — Check connectivity to the InvoiceShelf backend
+- `get_dashboard` — Get dashboard data
+- `get_bootstrap` — Get application bootstrap data
+- `search_customers_and_users` — Search across customers and users
+- `search_users` — Search users by email
+- `list_all_currencies` — List all currencies
+- `list_used_currencies` — List currencies in use
+- `list_all_countries` — List all countries
+- `list_timezones` — List available timezones
+- `list_date_formats` — List available date formats
+- `list_time_formats` — List available time formats
+- `get_next_number` — Get the next number for a resource
+- `get_number_placeholders` — Get number placeholders for a format
+- `get_current_company` — Get the current company
+- `list_all_companies` — List all companies
+- `list_abilities` — List all available abilities
+- `get_recurring_invoice_frequency` — Get the next occurrence for a recurring frequency
+- `get_exchange_rate` — Get an exchange rate for a currency
+- `get_active_exchange_rate_provider` — Get the active exchange-rate provider
+- `list_used_currencies_for_exchange` — List currencies used for exchange
+- `list_supported_currencies` — List currencies supported by an exchange-rate provider
