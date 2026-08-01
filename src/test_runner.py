@@ -86,6 +86,9 @@ MCP_SERVER_PORT = os.environ.get("MCP_SERVER_PORT", "")
 API_KEY = os.environ.get("API_KEY", "")
 MCP_URL = f"http://localhost:{MCP_SERVER_PORT}/mcp"
 
+TEST_EMAIL_TO = "solo@selfhostingbox.com"
+TEST_EMAIL_FROM = "no-reply@selfhostingbox.com"
+
 MCP_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 rid = os.urandom(4).hex()
@@ -815,7 +818,7 @@ async def main():
              "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
         IDS["id_inv_send"] = _int_id(_dict_id(inv_send_data))
         await run_test(session, "D19 send_invoice", "send_invoice",
-            {"id": IDS["id_inv_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_inv_send"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-InvSend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D20 send_estimate
@@ -824,7 +827,7 @@ async def main():
              "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
         IDS["id_est_send"] = _int_id(_dict_id(est_send_data))
         await run_test(session, "D20 send_estimate", "send_estimate",
-            {"id": IDS["id_est_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_est_send"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-EstSend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D21 send_payment
@@ -832,7 +835,7 @@ async def main():
             {"payment_date": today_iso, "customer_id": inv_cust, "amount": 25, "payment_number": make_name("PAY-SND")})
         IDS["id_pay_send"] = _int_id(_dict_id(pay_send_data))
         await run_test(session, "D21 send_payment", "send_payment",
-            {"id": IDS["id_pay_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_pay_send"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-PaySend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D22 get_invoice_send_preview
@@ -841,7 +844,7 @@ async def main():
              "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
         IDS["id_inv_preview"] = _int_id(_dict_id(inv_preview_data))
         await run_test(session, "D22 get_invoice_send_preview", "get_invoice_send_preview",
-            {"id": IDS["id_inv_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_inv_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # D23 get_estimate_send_preview
@@ -850,7 +853,7 @@ async def main():
              "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
         IDS["id_est_preview"] = _int_id(_dict_id(est_preview_data))
         await run_test(session, "D23 get_estimate_send_preview", "get_estimate_send_preview",
-            {"id": IDS["id_est_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_est_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # D24 get_payment_send_preview
@@ -858,7 +861,7 @@ async def main():
             {"payment_date": today_iso, "customer_id": inv_cust, "amount": 30, "payment_number": make_name("PAY-PRV")})
         IDS["id_pay_preview"] = _int_id(_dict_id(pay_preview_data))
         await run_test(session, "D24 get_payment_send_preview", "get_payment_send_preview",
-            {"id": IDS["id_pay_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+            {"id": IDS["id_pay_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
              "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # ------------------------------------------------------------------
