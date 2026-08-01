@@ -634,9 +634,9 @@ async def main():
             "delete_custom_field_by_id", "list_all_custom_fields", None, "name")
 
         await _run_crud_for(session, "role", "create_role",
-            {"name": make_name("Role"), "abilities": '[{"ability": "*"}]'},
+            {"name": make_name("Role"), "abilities": {"abilities": [{"ability": "*"}]}},
             "get_role_by_id", "update_role",
-            {"name": make_name("Role-upd"), "abilities": '[{"ability": "*"}]'},
+            {"name": make_name("Role-upd"), "abilities": {"abilities": [{"ability": "*"}]}},
             "delete_role_by_id", "list_all_roles", None, "name")
 
         await _run_crud_for(session, "invoice", "create_invoice",

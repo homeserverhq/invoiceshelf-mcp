@@ -36,15 +36,12 @@ def _filter_fields(data: Any, common_set: set[str]) -> Any:
 
 
 def _normalize_datetime(value: str) -> str:
-    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$', value):
-        parsed = dt.datetime.fromisoformat(value)
+    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value):
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
         parsed = parsed.astimezone(dt.timezone.utc)
         return parsed.strftime('%Y-%m-%d')
-    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value):
-        raise ValueError(
-            f"Invalid datetime: {value}. Timezone offset is required. "
-            "Must use format: 2026-06-22T15:00:00-04:00"
-        )
     return value
 
 
