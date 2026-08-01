@@ -30,6 +30,14 @@ COMMON_FIELDS: dict[str, set[str]] = {
     "estimate_template": {"name"},
 }
 
+MONEY_FIELDS: set[str] = {
+    "price", "amount", "sub_total", "total", "tax", "due_amount",
+    "base_price", "base_sub_total", "base_total", "base_tax", "base_due_amount",
+    "total_amount_due", "total_sales", "total_receipts", "total_expenses",
+    "total_net_income", "invoice_totals", "expense_totals", "receipt_totals",
+    "net_income_totals",
+}
+
 PREFIX = "/api/v1"
 
 
@@ -48,6 +56,25 @@ def _strip_roles(data: Any) -> Any:
     if isinstance(data, list):
         return [_strip_roles(item) for item in data]
     return data
+
+
+def _apply_money_factor(data: Any, factor: float, precision: int, is_outbound: bool = False) -> None:
+    """Apply factor to MONEY_FIELDS in a single dict node. Does NOT recurse."""
+    if isinstance(data, dict):
+        for k, v in list(data.items()):
+            money_field = k in MONEY_FIELDS or (
+                k == "discount_val" and isinstance(v, (int, float))
+                and data.get("discount_type") == "fixed"
+            )
+            if money_field:
+                if isinstance(v, (int, float)):
+                    data[k] = int(round(v * factor)) if is_outbound else round(v / factor, precision)
+                elif isinstance(v, list):
+                    data[k] = [
+                        int(round(x * factor)) if is_outbound else round(x / factor, precision)
+                        if isinstance(x, (int, float)) else x
+                        for x in v
+                    ]
 
 
 def _normalize_datetime(value: str) -> str:
@@ -87,6 +114,10 @@ class InvoiceShelfClient:
                 "InvoiceShelf URL required. Set INVOICESHELF_BASE_URL env var "
                 "or pass base_url."
             )
+        self._currencies_by_id: dict[int, dict] = {}
+        self._currency_seeding: bool = False
+        self._bootstrap_seeded: bool = False
+        self._company_default_precision: int = 2
 
     def _get_headers(self, api_key: Optional[str] = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -109,7 +140,14 @@ class InvoiceShelfClient:
                 return {}
             if response.headers.get("content-type", "").startswith("application/json"):
                 data = response.json()
-                return data if keep_roles else _strip_roles(data)
+                # Inbound money conversion on the response
+                if not keep_roles:
+                    await self._ensure_currencies(api_key)
+                    await self._ensure_company_currency(api_key)
+                    self._inbound_money_convert(data, self._company_default_precision)
+                if not keep_roles:
+                    data = _strip_roles(data)
+                return data
             return {"text": response.text}
 
     async def get(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
@@ -135,11 +173,78 @@ class InvoiceShelfClient:
             result = _filter_fields(result, COMMON_FIELDS[resource_key])
         return _denormalize_response(result)
 
-    def _normalize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {
+    async def _normalize_payload(self, payload: dict[str, Any], api_key: Optional[str] = None) -> dict[str, Any]:
+        result = {
             k: _normalize_datetime(v) if isinstance(v, str) else v
             for k, v in payload.items()
         }
+        if api_key:
+            await self._ensure_currencies(api_key)
+            await self._ensure_company_currency(api_key)
+            self._outbound_money_convert(result, self._company_default_precision)
+        return result
+
+    # =========================================================================
+    # Currency-aware money conversion (used by request())
+    # =========================================================================
+
+    async def _ensure_currencies(self, api_key: Optional[str] = None) -> None:
+        if self._currencies_by_id or self._currency_seeding:
+            return
+        self._currency_seeding = True
+        try:
+            data = await self.get(f"{PREFIX}/currencies", api_key)
+            for c in (self._unwrap(data) or []):
+                if isinstance(c, dict) and "id" in c:
+                    cid = int(c["id"])
+                    self._currencies_by_id[cid] = c
+        finally:
+            self._currency_seeding = False
+
+    async def _ensure_company_currency(self, api_key: Optional[str] = None) -> None:
+        if self._bootstrap_seeded:
+            return
+        self._bootstrap_seeded = True
+        try:
+            data = await self.get(f"{PREFIX}/bootstrap", api_key)
+            unwrapped = self._unwrap(data)
+            ccc = (unwrapped or {}).get("current_company_currency") or {}
+            if ccc.get("precision") is not None:
+                self._company_default_precision = int(ccc["precision"])
+        except Exception:
+            self._company_default_precision = 2
+
+    def _get_precision(self, currency_id: Any) -> int:
+        if currency_id is not None:
+            c = self._currencies_by_id.get(int(currency_id))
+            if c:
+                return int(c.get("precision", 2))
+        return self._company_default_precision
+
+    def _inbound_money_convert(self, data: Any, default_precision: int) -> None:
+        if isinstance(data, dict):
+            cid = data.get("currency_id")
+            precision = self._get_precision(cid) if cid is not None else default_precision
+            _apply_money_factor(data, 10 ** precision, precision, is_outbound=False)
+            for v in data.values():
+                if isinstance(v, (dict, list)):
+                    self._inbound_money_convert(v, precision)
+        elif isinstance(data, list):
+            for item in data:
+                self._inbound_money_convert(item, default_precision)
+
+    def _outbound_money_convert(self, data: Any, default_precision: int) -> None:
+        if isinstance(data, dict):
+            cid = data.get("currency_id")
+            precision = self._get_precision(cid) if cid is not None else default_precision
+            _apply_money_factor(data, 10 ** precision, precision, is_outbound=True)
+            for k, v in list(data.items()):
+                if isinstance(v, dict):
+                    self._outbound_money_convert(v, precision)
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            self._outbound_money_convert(item, precision)
 
     # =========================================================================
     # Customers
@@ -160,11 +265,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "customer")
 
     async def create_customer(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/customers", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/customers", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "customer")
 
     async def update_customer(self, customer_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/customers/{customer_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/customers/{customer_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "customer")
 
     async def delete_customers(self, ids: list[int], api_key: Optional[str] = None) -> Any:
@@ -205,11 +310,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "item")
 
     async def create_item(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/items", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/items", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "item")
 
     async def update_item(self, item_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/items/{item_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/items/{item_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "item")
 
     async def delete_items(self, ids: list[int], api_key: Optional[str] = None) -> Any:
@@ -257,11 +362,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "invoice")
 
     async def create_invoice(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/invoices", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/invoices", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "invoice")
 
     async def update_invoice(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/invoices/{invoice_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/invoices/{invoice_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "invoice")
 
     async def delete_invoices(self, ids: list[int], api_key: Optional[str] = None) -> Any:
@@ -310,11 +415,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "estimate")
 
     async def create_estimate(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/estimates", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/estimates", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "estimate")
 
     async def update_estimate(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/estimates/{estimate_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/estimates/{estimate_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "estimate")
 
     async def delete_estimates(self, ids: list[int], api_key: Optional[str] = None) -> Any:
@@ -367,18 +472,18 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "expense")
 
     async def create_expense(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/expenses", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/expenses", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "expense")
 
     async def update_expense(self, expense_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/expenses/{expense_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/expenses/{expense_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "expense")
 
     async def delete_expenses(self, ids: list[int], api_key: Optional[str] = None) -> Any:
         return await self.post(f"{PREFIX}/expenses/delete", api_key, json={"ids": ids})
 
     async def duplicate_expense(self, expense_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/expenses/{expense_id}/duplicate", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/expenses/{expense_id}/duplicate", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "expense")
 
     # =========================================================================
@@ -423,11 +528,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "payment")
 
     async def create_payment(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/payments", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/payments", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "payment")
 
     async def update_payment(self, payment_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/payments/{payment_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/payments/{payment_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "payment")
 
     async def delete_payments(self, ids: list[int], api_key: Optional[str] = None) -> Any:
@@ -553,11 +658,11 @@ class InvoiceShelfClient:
         return self._apply(data, api_key, include_all_fields, "recurring_invoice")
 
     async def create_recurring_invoice(self, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.post(f"{PREFIX}/recurring-invoices", api_key, json=self._normalize_payload(payload))
+        data = await self.post(f"{PREFIX}/recurring-invoices", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "recurring_invoice")
 
     async def update_recurring_invoice(self, ri_id: int, payload: dict[str, Any], api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
-        data = await self.put(f"{PREFIX}/recurring-invoices/{ri_id}", api_key, json=self._normalize_payload(payload))
+        data = await self.put(f"{PREFIX}/recurring-invoices/{ri_id}", api_key, json=await self._normalize_payload(payload, api_key))
         return self._apply(data, api_key, include_all_fields, "recurring_invoice")
 
     async def delete_recurring_invoices(self, ids: list[int], api_key: Optional[str] = None) -> Any:

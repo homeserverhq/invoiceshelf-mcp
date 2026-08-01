@@ -1105,6 +1105,159 @@ async def main():
             await run_test(session, "F8a get_current_company has no roles",
                 "get_current_company", {},
                 assert_fn=_assert_has_no_roles)
+            # Phase 4d: Money Conversion (cents ⇄ dollars)
+            # ------------------------------------------------------------------
+            log("\n=== Phase 4d: Money Conversion ===")
+            raw_api = "http://localhost:4584/api/v1"
+
+            # G1: Item — price 5 (dollars) → stored 500 (cents) for USD precision 2
+            g1_name = make_name("Mon")
+            g1_item = await run_test(session, "G1 create_item price 5",
+                "create_item", {"name": g1_name, "price": 5},
+                assert_fn=lambda d: _assert_created(d, {"name": g1_name}, "name"))
+            g1_id = _int_id(_dict_id(g1_item))
+            if g1_id:
+                IDS["id_money_item"] = g1_id
+                # MCP inbound: price should be 5 (dollars)
+                await run_test(session, "G1 get_item shows dollars",
+                    "get_item_by_id", {"id": g1_id},
+                    assert_fn=lambda d: None if isinstance(d, dict) and d.get("price") == 5
+                    else f"Expected price 5 (dollars), got {d.get('price')!r}")
+                # Raw API cross-check: stored 500 (cents)
+                try:
+                    ri = httpx.get(f"{raw_api}/items/{g1_id}",
+                        headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                    raw_px = ri.get("data", {}).get("price")
+                    if raw_px != 500:
+                        results.append({"label": "G1 raw item cents", "tool": "get_item_by_id",
+                            "status": "FAILED", "reason": f"expected 500 cents, got {raw_px}"})
+                        log(f"  FAIL G1 raw item cents: expected 500, got {raw_px}")
+                    else:
+                        results.append({"label": "G1 raw item cents", "tool": "get_item_by_id",
+                            "status": "PASSED"})
+                        log("  PASS G1 raw item cents")
+                except Exception as e:
+                    results.append({"label": "G1 raw item cents", "tool": "get_item_by_id",
+                        "status": "FAILED", "reason": str(e)})
+                    log(f"  FAIL G1 raw item cents: {e}")
+
+            # G2: Invoice with line item price (no discount, verify price only)
+            g2_num = f"MON-{rid}"
+            g2_inv = await run_test(session, "G2 create_invoice price 8",
+                "create_invoice", {
+                    "customer_id": cust_id, "invoice_number": g2_num,
+                    "invoice_date": "2026-01-15", "template_name": "invoice1",
+                    "items": {"items": [{"name": make_name("Mon"), "quantity": 1, "price": 8}]},
+                },
+                assert_fn=_assert_not_empty)
+            g2_id = _int_id(_dict_id(g2_inv))
+            if g2_id:
+                IDS["id_money_inv"] = g2_id
+                # MCP inbound: total should be 8 (dollars, recomputed server-side from 800 cents)
+                g2_get = await run_test(session, "G2 get_invoice shows dollars",
+                    "get_invoice_by_id", {"id": g2_id},
+                    assert_fn=lambda d: None if isinstance(d, dict) and d.get("total") == 8
+                    else f"Expected total 8 (dollars), got {d.get('total')!r}")
+                # Raw API cross-check: stored item price 800 (cents), total 800 (cents)
+                try:
+                    ri = httpx.get(f"{raw_api}/invoices/{g2_id}",
+                        headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                    rd = ri.get("data", {})
+                    raw_item = (rd.get("items") or [{}])[0]
+                    raw_total = rd.get("total")
+                    raw_price = raw_item.get("price")
+                    errs = []
+                    if raw_total != 800:
+                        errs.append(f"total={raw_total}(want 800)")
+                    if raw_price != 800:
+                        errs.append(f"item.price={raw_price}(want 800)")
+                    if errs:
+                        results.append({"label": "G2 raw invoice cents", "tool": "get_invoice_by_id",
+                            "status": "FAILED", "reason": "; ".join(errs)})
+                        log(f"  FAIL G2 raw invoice cents: {'; '.join(errs)}")
+                    else:
+                        results.append({"label": "G2 raw invoice cents", "tool": "get_invoice_by_id",
+                            "status": "PASSED"})
+                        log("  PASS G2 raw invoice cents")
+                except Exception as e:
+                    results.append({"label": "G2 raw invoice cents", "tool": "get_invoice_by_id",
+                        "status": "FAILED", "reason": str(e)})
+                    log(f"  FAIL G2 raw invoice cents: {e}")
+            # G2b: Invoice with fixed discount — verify discount_val conversion
+            g2b_num = f"DISC-{rid}"
+            g2b_inv = await run_test(session, "G2b create_invoice disc_val 1 fixed",
+                "create_invoice", {
+                    "customer_id": cust_id, "invoice_number": g2b_num,
+                    "invoice_date": "2026-01-15", "template_name": "invoice1",
+                    "items": {"items": [{"name": make_name("Disc"), "quantity": 1, "price": 10}]},
+                    "discount_type": "fixed", "discount_val": 1,
+                },
+                assert_fn=_assert_not_empty)
+            g2b_id = _int_id(_dict_id(g2b_inv))
+            IDS["id_money_inv_disc"] = g2b_id
+            if g2b_id:
+                # Raw API: stored discount_val 100 (cents), total 900 (cents)
+                try:
+                    ri = httpx.get(f"{raw_api}/invoices/{g2b_id}",
+                        headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                    rd = ri.get("data", {})
+                    raw_dv = rd.get("discount_val")
+                    raw_total = rd.get("total")
+                    errs = []
+                    if raw_dv != 100:
+                        errs.append(f"discount_val={raw_dv}(want 100)")
+                    if raw_total != 900:
+                        errs.append(f"total={raw_total}(want 900)")
+                    if errs:
+                        results.append({"label": "G2b raw invoice disc cents", "tool": "get_invoice_by_id",
+                            "status": "FAILED", "reason": "; ".join(errs)})
+                        log(f"  FAIL G2b raw invoice disc cents: {'; '.join(errs)}")
+                    else:
+                        results.append({"label": "G2b raw invoice disc cents", "tool": "get_invoice_by_id",
+                            "status": "PASSED"})
+                        log("  PASS G2b raw invoice disc cents")
+                except Exception as e:
+                    results.append({"label": "G2b raw invoice disc cents", "tool": "get_invoice_by_id",
+                        "status": "FAILED", "reason": str(e)})
+                    log(f"  FAIL G2b raw invoice disc cents: {e}")
+
+            # G3: Expense amount conversion (needs category fixture)
+            g3_cat_id = IDS.get("category_fixture")
+            g3_ccy = IDS.get("company_currency")
+            if g3_cat_id and g3_ccy:
+                g3_exp = await run_test(session, "G3 create_expense amount 10",
+                    "create_expense", {
+                        "expense_date": "2026-01-15", "amount": 10,
+                        "expense_category_id": g3_cat_id, "customer_id": cust_id,
+                        "currency_id": str(g3_ccy), "exchange_rate": "1",
+                        "customer_id": str(cust_id), "expense_number": make_name("EXP"),
+                    },
+                    assert_fn=_assert_not_empty)
+                g3_id = _int_id(_dict_id(g3_exp))
+                if g3_id:
+                    IDS["id_money_expense"] = g3_id
+                    # MCP inbound: amount should be 10 (dollars)
+                    await run_test(session, "G3 get_expense shows dollars",
+                        "get_expense_by_id", {"id": g3_id},
+                        assert_fn=lambda d: None if isinstance(d, dict) and d.get("amount") == 10
+                        else f"Expected amount 10 (dollars), got {d.get('amount')!r}")
+                    # Raw API: stored 1000 (cents)
+                    try:
+                        ri = httpx.get(f"{raw_api}/expenses/{g3_id}",
+                            headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                        raw_amt = ri.get("data", {}).get("amount")
+                        if raw_amt != 1000:
+                            results.append({"label": "G3 raw expense cents", "tool": "get_expense_by_id",
+                                "status": "FAILED", "reason": f"expected 1000 cents, got {raw_amt}"})
+                            log(f"  FAIL G3 raw expense cents: expected 1000, got {raw_amt}")
+                        else:
+                            results.append({"label": "G3 raw expense cents", "tool": "get_expense_by_id",
+                                "status": "PASSED"})
+                            log("  PASS G3 raw expense cents")
+                    except Exception as e:
+                        results.append({"label": "G3 raw expense cents", "tool": "get_expense_by_id",
+                            "status": "FAILED", "reason": str(e)})
+                        log(f"  FAIL G3 raw expense cents: {e}")
         else:
             log("  SKIP Phase 4c: no customer_fixture available")
 
@@ -1142,6 +1295,10 @@ async def main():
             ("id_inv_preview", "delete_invoices_by_id"),
             ("id_est_preview", "delete_estimates_by_id"),
             ("id_pay_preview", "delete_payments_by_id"),
+            ("id_money_item", "delete_items_by_id"),
+            ("id_money_inv", "delete_invoices_by_id"),
+            ("id_money_inv_disc", "delete_invoices_by_id"),
+            ("id_money_expense", "delete_expenses_by_id"),
         ]:
             await session.call_tool(dtool, {"id": IDS[id_key]})
             log(f"  CLEANUP {id_key} id={IDS[id_key]}")
