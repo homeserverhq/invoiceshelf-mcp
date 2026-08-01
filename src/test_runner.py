@@ -384,6 +384,55 @@ def _assert_has_no_roles(data: Any) -> str | None:
     return None
 
 
+def _assert_numeric(data: Any, key: str, expected: Any) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    v = data.get(key)
+    if isinstance(v, str):
+        return f"Money field '{key}' leaked as string: {v!r}"
+    if v is None:
+        return f"Field '{key}' is None"
+    try:
+        if float(v) != float(expected):
+            return f"Field '{key}' expected {expected}, got {v!r}"
+    except (TypeError, ValueError):
+        return f"Field '{key}' not numeric: {v!r}"
+    return None
+
+
+def _assert_discount_fields(data: Any) -> str | None:
+    """discount_val and base_discount_val must read back in whole units (fixed discount)."""
+    for k, exp in (("discount_val", 1), ("base_discount_val", 1)):
+        err = _assert_numeric(data, k, exp)
+        if err:
+            return err
+    return None
+
+
+def _assert_dashboard_money(data: Any) -> str | None:
+    """Dashboard money fields must be numeric (never raw cents leaked as strings)."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    for k in ("total_sales", "total_amount_due", "total_receipts", "total_expenses", "total_net_income"):
+        if k in data:
+            v = data[k]
+            if isinstance(v, str):
+                return f"Money field '{k}' leaked as string: {v!r}"
+            if not isinstance(v, (int, float)):
+                return f"Money field '{k}' not numeric: {v!r}"
+    cd = data.get("chart_data")
+    if isinstance(cd, dict):
+        for arrk in ("invoice_totals", "expense_totals", "receipt_totals", "net_income_totals"):
+            arr = cd.get(arrk)
+            if isinstance(arr, list):
+                for x in arr:
+                    if isinstance(x, str):
+                        return f"chart_data.{arrk} leaked a string element: {x!r}"
+                    if not isinstance(x, (int, float)):
+                        return f"chart_data.{arrk} has non-numeric element: {x!r}"
+    return None
+
+
 def static_conformance_guard() -> list[dict[str, str]]:
     """Scan src/main.py and verify every tool follows include_all_fields transmission rules."""
     src_path = Path(__file__).with_name("main.py")
@@ -1203,11 +1252,14 @@ async def main():
                     rd = ri.get("data", {})
                     raw_dv = rd.get("discount_val")
                     raw_total = rd.get("total")
+                    raw_bdv = rd.get("base_discount_val")
                     errs = []
                     if raw_dv != 100:
                         errs.append(f"discount_val={raw_dv}(want 100)")
                     if raw_total != 900:
                         errs.append(f"total={raw_total}(want 900)")
+                    if raw_bdv != 100:
+                        errs.append(f"base_discount_val={raw_bdv}(want 100)")
                     if errs:
                         results.append({"label": "G2b raw invoice disc cents", "tool": "get_invoice_by_id",
                             "status": "FAILED", "reason": "; ".join(errs)})
@@ -1220,6 +1272,10 @@ async def main():
                     results.append({"label": "G2b raw invoice disc cents", "tool": "get_invoice_by_id",
                         "status": "FAILED", "reason": str(e)})
                     log(f"  FAIL G2b raw invoice disc cents: {e}")
+                # MCP inbound: fixed discount must read back in whole units
+                await run_test(session, "G2b get_invoice disc in dollars",
+                    "get_invoice_by_id", {"id": g2b_id, "include_all_fields": True},
+                    assert_fn=_assert_discount_fields)
 
             # G3: Expense amount conversion (needs category fixture)
             g3_cat_id = IDS.get("category_fixture")
@@ -1258,6 +1314,78 @@ async def main():
                         results.append({"label": "G3 raw expense cents", "tool": "get_expense_by_id",
                             "status": "FAILED", "reason": str(e)})
                         log(f"  FAIL G3 raw expense cents: {e}")
+
+            # G4: Dashboard money fields must be numeric, never raw cents as strings
+            await run_test(session, "G4 dashboard money numeric",
+                "get_dashboard", {},
+                assert_fn=_assert_dashboard_money)
+
+            # G5: JPY (precision 0) expense — factor 1, no minor-unit scaling
+            if g3_cat_id:
+                g5_exp = await run_test(session, "G5 create_expense JPY amount 500",
+                    "create_expense", {
+                        "expense_date": "2026-01-15", "amount": 500,
+                        "expense_category_id": g3_cat_id, "customer_id": str(cust_id),
+                        "currency_id": 52, "exchange_rate": "1",
+                        "expense_number": make_name("EXP"),
+                    },
+                    assert_fn=_assert_not_empty)
+                g5_id = _int_id(_dict_id(g5_exp))
+                IDS["id_money_exp_jpy"] = g5_id
+                if g5_id:
+                    await run_test(session, "G5 get_expense JPY shows 500",
+                        "get_expense_by_id", {"id": g5_id},
+                        assert_fn=lambda d: _assert_numeric(d, "amount", 500))
+                    try:
+                        ri = httpx.get(f"{raw_api}/expenses/{g5_id}",
+                            headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                        raw_amt = ri.get("data", {}).get("amount")
+                        if raw_amt != 500:
+                            results.append({"label": "G5 raw JPY units", "tool": "get_expense_by_id",
+                                "status": "FAILED", "reason": f"expected 500 units, got {raw_amt}"})
+                            log(f"  FAIL G5 raw JPY units: expected 500, got {raw_amt}")
+                        else:
+                            results.append({"label": "G5 raw JPY units", "tool": "get_expense_by_id",
+                                "status": "PASSED"})
+                            log("  PASS G5 raw JPY units")
+                    except Exception as e:
+                        results.append({"label": "G5 raw JPY units", "tool": "get_expense_by_id",
+                            "status": "FAILED", "reason": str(e)})
+                        log(f"  FAIL G5 raw JPY units: {e}")
+
+                # G6: KWD (precision 3) expense — factor 1000
+                g6_exp = await run_test(session, "G6 create_expense KWD amount 12.345",
+                    "create_expense", {
+                        "expense_date": "2026-01-15", "amount": 12.345,
+                        "expense_category_id": g3_cat_id, "customer_id": str(cust_id),
+                        "currency_id": 12, "exchange_rate": "1",
+                        "expense_number": make_name("EXP"),
+                    },
+                    assert_fn=_assert_not_empty)
+                g6_id = _int_id(_dict_id(g6_exp))
+                IDS["id_money_exp_kwd"] = g6_id
+                if g6_id:
+                    await run_test(session, "G6 get_expense KWD shows 12.345",
+                        "get_expense_by_id", {"id": g6_id},
+                        assert_fn=lambda d: _assert_numeric(d, "amount", 12.345))
+                    try:
+                        ri = httpx.get(f"{raw_api}/expenses/{g6_id}",
+                            headers={"Authorization": f"Bearer {API_KEY}"}).json()
+                        raw_amt = ri.get("data", {}).get("amount")
+                        if raw_amt != 12345:
+                            results.append({"label": "G6 raw KWD units", "tool": "get_expense_by_id",
+                                "status": "FAILED", "reason": f"expected 12345 units, got {raw_amt}"})
+                            log(f"  FAIL G6 raw KWD units: expected 12345, got {raw_amt}")
+                        else:
+                            results.append({"label": "G6 raw KWD units", "tool": "get_expense_by_id",
+                                "status": "PASSED"})
+                            log("  PASS G6 raw KWD units")
+                    except Exception as e:
+                        results.append({"label": "G6 raw KWD units", "tool": "get_expense_by_id",
+                            "status": "FAILED", "reason": str(e)})
+                        log(f"  FAIL G6 raw KWD units: {e}")
+            else:
+                log("  SKIP G5/G6: no category_fixture available")
         else:
             log("  SKIP Phase 4c: no customer_fixture available")
 
@@ -1299,6 +1427,8 @@ async def main():
             ("id_money_inv", "delete_invoices_by_id"),
             ("id_money_inv_disc", "delete_invoices_by_id"),
             ("id_money_expense", "delete_expenses_by_id"),
+            ("id_money_exp_jpy", "delete_expenses_by_id"),
+            ("id_money_exp_kwd", "delete_expenses_by_id"),
         ]:
             await session.call_tool(dtool, {"id": IDS[id_key]})
             log(f"  CLEANUP {id_key} id={IDS[id_key]}")

@@ -1,3 +1,4 @@
+import copy
 import datetime as dt
 import os
 import re
@@ -33,6 +34,7 @@ COMMON_FIELDS: dict[str, set[str]] = {
 MONEY_FIELDS: set[str] = {
     "price", "amount", "sub_total", "total", "tax", "due_amount",
     "base_price", "base_sub_total", "base_total", "base_tax", "base_due_amount",
+    "base_discount_val",
     "total_amount_due", "total_sales", "total_receipts", "total_expenses",
     "total_net_income", "invoice_totals", "expense_totals", "receipt_totals",
     "net_income_totals",
@@ -58,23 +60,57 @@ def _strip_roles(data: Any) -> Any:
     return data
 
 
+def _money_amount(value: Any) -> Optional[float]:
+    """Return a numeric amount for an int/float or a numeric string, else None."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if s and re.fullmatch(r"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", s):
+            try:
+                return float(s)
+            except ValueError:
+                return None
+    return None
+
+
+def _convert_money(amount: float, factor: float, precision: int, is_outbound: bool) -> Any:
+    """Convert a single money amount between minor units (cents) and whole units."""
+    if is_outbound:
+        return int(round(amount * factor))
+    value = round(amount / factor, precision)
+    if float(value).is_integer():
+        return int(value)
+    return value
+
+
 def _apply_money_factor(data: Any, factor: float, precision: int, is_outbound: bool = False) -> None:
     """Apply factor to MONEY_FIELDS in a single dict node. Does NOT recurse."""
-    if isinstance(data, dict):
-        for k, v in list(data.items()):
-            money_field = k in MONEY_FIELDS or (
-                k == "discount_val" and isinstance(v, (int, float))
-                and data.get("discount_type") == "fixed"
-            )
-            if money_field:
-                if isinstance(v, (int, float)):
-                    data[k] = int(round(v * factor)) if is_outbound else round(v / factor, precision)
-                elif isinstance(v, list):
-                    data[k] = [
-                        int(round(x * factor)) if is_outbound else round(x / factor, precision)
-                        if isinstance(x, (int, float)) else x
-                        for x in v
-                    ]
+    if not isinstance(data, dict):
+        return
+    for k, v in list(data.items()):
+        money_field = k in MONEY_FIELDS or (
+            k == "discount_val"
+            and _money_amount(v) is not None
+            and data.get("discount_type") == "fixed"
+        )
+        if not money_field:
+            continue
+        if isinstance(v, (list, tuple)):
+            converted: list[Any] = []
+            for x in v:
+                amt = _money_amount(x)
+                if amt is None:
+                    converted.append(x)
+                else:
+                    converted.append(_convert_money(amt, factor, precision, is_outbound))
+            data[k] = converted
+        else:
+            amt = _money_amount(v)
+            if amt is not None:
+                data[k] = _convert_money(amt, factor, precision, is_outbound)
 
 
 def _normalize_datetime(value: str) -> str:
@@ -125,7 +161,7 @@ class InvoiceShelfClient:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
-    async def request(self, method: str, path: str, api_key: Optional[str] = None, keep_roles: bool = False, **kwargs: Any) -> Any:
+    async def request(self, method: str, path: str, api_key: Optional[str] = None, keep_roles: bool = False, convert_money: bool = True, **kwargs: Any) -> Any:
         url = f"{self.base_url}{path}"
         headers = self._get_headers(api_key)
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -141,7 +177,7 @@ class InvoiceShelfClient:
             if response.headers.get("content-type", "").startswith("application/json"):
                 data = response.json()
                 # Inbound money conversion on the response
-                if not keep_roles:
+                if convert_money:
                     await self._ensure_currencies(api_key)
                     await self._ensure_company_currency(api_key)
                     self._inbound_money_convert(data, self._company_default_precision)
@@ -175,7 +211,7 @@ class InvoiceShelfClient:
 
     async def _normalize_payload(self, payload: dict[str, Any], api_key: Optional[str] = None) -> dict[str, Any]:
         result = {
-            k: _normalize_datetime(v) if isinstance(v, str) else v
+            k: _normalize_datetime(v) if isinstance(v, str) else copy.deepcopy(v)
             for k, v in payload.items()
         }
         if api_key:
@@ -198,6 +234,8 @@ class InvoiceShelfClient:
                 if isinstance(c, dict) and "id" in c:
                     cid = int(c["id"])
                     self._currencies_by_id[cid] = c
+        except Exception:
+            self._currencies_by_id = {}
         finally:
             self._currency_seeding = False
 
@@ -287,7 +325,7 @@ class InvoiceShelfClient:
         return unwrapped
 
     async def get_customer_roles_by_id(self, customer_id: int, api_key: Optional[str] = None) -> Any:
-        data = await self.get(f"{PREFIX}/customers/{customer_id}", api_key, keep_roles=True)
+        data = await self.get(f"{PREFIX}/customers/{customer_id}", api_key, keep_roles=True, convert_money=False)
         unwrapped = self._unwrap(data)
         return {"roles": unwrapped.get("roles", []) if isinstance(unwrapped, dict) else []}
 
@@ -783,7 +821,7 @@ class InvoiceShelfClient:
         return self._unwrap(data)
 
     async def get_company_roles_by_id(self, company_id: int, api_key: Optional[str] = None) -> Any:
-        data = await self.get(f"{PREFIX}/companies", api_key, keep_roles=True)
+        data = await self.get(f"{PREFIX}/companies", api_key, keep_roles=True, convert_money=False)
         companies = self._unwrap(data)
         for company in companies if isinstance(companies, list) else []:
             if isinstance(company, dict) and str(company.get("id")) == str(company_id):
@@ -791,7 +829,7 @@ class InvoiceShelfClient:
         return {"id": company_id, "roles": [], "error": "company not found"}
 
     async def get_current_user_roles(self, api_key: Optional[str] = None) -> Any:
-        data = await self.get(f"{PREFIX}/bootstrap", api_key, keep_roles=True)
+        data = await self.get(f"{PREFIX}/bootstrap", api_key, keep_roles=True, convert_money=False)
         unwrapped = self._unwrap(data)
         current_user = unwrapped.get("current_user", {}) if isinstance(unwrapped, dict) else {}
         if not isinstance(current_user, dict):
