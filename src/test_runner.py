@@ -626,10 +626,10 @@ async def main():
             "delete_note_by_id", "list_all_notes", None, "name")
 
         await _run_crud_for(session, "custom_field", "create_custom_field",
-            {"name": make_name("Field"), "label": f"{rid} Field", "model_type": "App\\Models\\Customer",
+            {"name": make_name("Field"), "label": f"{rid} Field", "model_type": "Customer",
              "order": 1, "type": "INPUT", "is_required": False},
             "get_custom_field_by_id", "update_custom_field",
-            {"name": make_name("Field-upd"), "label": f"{rid} Updated", "model_type": "App\\Models\\Customer",
+            {"name": make_name("Field-upd"), "label": f"{rid} Updated", "model_type": "Customer",
              "order": 1, "type": "INPUT", "is_required": False},
             "delete_custom_field_by_id", "list_all_custom_fields", None, "name")
 
@@ -860,6 +860,62 @@ async def main():
         await run_test(session, "D24 get_payment_send_preview", "get_payment_send_preview",
             {"id": IDS["id_pay_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
              "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
+
+        # ------------------------------------------------------------------
+        # Phase 4b: Enum Validation (case-invariance + closed-list rejection)
+        # ------------------------------------------------------------------
+        log("\n=== Phase 4b: Enum Validation ===")
+
+        # Case-invariance: any casing is accepted and canonicalized internally.
+        await run_test(session, "E1 change_invoice_status lowercase sent", "change_invoice_status",
+            {"id": IDS["id_inv_status"], "status": "sent"}, assert_fn=_assert_success_true)
+        await run_test(session, "E2 change_estimate_status lowercase sent", "change_estimate_status",
+            {"id": IDS["id_est_status"], "status": "sent"}, assert_fn=_assert_success_true)
+
+        async def _reject(label: str, tool: str, params: dict[str, Any]) -> bool:
+            exercised_tools.add(tool)
+            result = await session.call_tool(tool, params)
+            err = is_error(result)
+            ok = bool(err)
+            results.append({"label": label, "tool": tool, "status": "PASSED" if ok else "FAILED",
+                            "reason": None if ok else "invalid enum value was accepted"})
+            log(f"  {'PASS' if ok else 'FAIL'} {label}")
+            return ok
+
+        await _reject("E3 get_next_number bad key", "get_next_number", {"key": "banana"})
+        await _reject("E4 create_invoice bad template_name", "create_invoice",
+            {"customer_id": inv_cust, "invoice_number": make_name("REJ"), "invoice_date": today_iso,
+             "template_name": "bogus", "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+        await _reject("E5 create_invoice bad discount_type", "create_invoice",
+            {"customer_id": inv_cust, "invoice_number": make_name("REJ2"), "invoice_date": today_iso,
+             "template_name": "invoice1", "discount_type": "banana",
+             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+        await _reject("E6 create_custom_field bad model_type", "create_custom_field",
+            {"name": make_name("RejField"), "label": f"{rid} Rej", "model_type": "Banana",
+             "order": 1, "type": "INPUT", "is_required": False})
+        await _reject("E7 create_custom_field bad type", "create_custom_field",
+            {"name": make_name("RejField2"), "label": f"{rid} Rej2", "model_type": "Customer",
+             "order": 1, "type": "BANANA", "is_required": False})
+        await _reject("E8 create_note bad type", "create_note",
+            {"type": "spam", "name": make_name("RejNote"), "notes": "x", "is_default": False})
+        await _reject("E9 create_tax_type bad calculation_type", "create_tax_type",
+            {"name": make_name("RejTax"), "calculation_type": "banana", "percent": "10"})
+        await _reject("E10 change_invoice_status bad status", "change_invoice_status",
+            {"id": IDS["id_inv_status"], "status": "BOGUS"})
+        await _reject("E11 change_estimate_status bad status", "change_estimate_status",
+            {"id": IDS["id_est_status"], "status": "BOGUS"})
+        await _reject("E12 create_recurring_invoice bad status", "create_recurring_invoice",
+            {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
+             "status": "BOGUS", "limit_by": "COUNT", "send_automatically": False,
+             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+        await _reject("E13 create_recurring_invoice bad limit_by", "create_recurring_invoice",
+            {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
+             "status": "ACTIVE", "limit_by": "NEVER", "send_automatically": False,
+             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+        await _reject("E14 list_supported_currencies bad driver", "list_supported_currencies",
+            {"driver": "nonsense", "key": "test"})
+        await _reject("E15 update_tax_type bad compound_tax", "update_tax_type",
+            {"id": 1, "compound_tax": "banana"})
 
         # ------------------------------------------------------------------
         # Phase 4 Cleanup: Delete all Phase 4 created resources unconditionally
