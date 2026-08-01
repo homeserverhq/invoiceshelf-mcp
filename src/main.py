@@ -256,9 +256,13 @@ async def list_all_currencies(include_all_fields: bool = False, ctx: Context = N
     return {"items": json_to_toon(data)}
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
-async def list_used_currencies(ctx: Context = None) -> dict[str, Any]:
-    """List currencies that have been used in transactions."""
-    return await get_client().list_used_currencies(get_user_token())
+async def list_used_currencies(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List currencies that have been used in transactions.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_used_currencies(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
 async def list_all_countries(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
@@ -271,19 +275,31 @@ async def list_all_countries(include_all_fields: bool = False, ctx: Context = No
     return {"items": json_to_toon(data)}
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
-async def list_timezones(ctx: Context = None) -> dict[str, Any]:
-    """List all timezones."""
-    return await get_client().list_timezones(get_user_token())
+async def list_timezones(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List all timezones.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_timezones(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
-async def list_date_formats(ctx: Context = None) -> dict[str, Any]:
-    """List available date formats."""
-    return await get_client().list_date_formats(get_user_token())
+async def list_date_formats(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List available date formats.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_date_formats(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
-async def list_time_formats(ctx: Context = None) -> dict[str, Any]:
-    """List available time formats."""
-    return await get_client().list_time_formats(get_user_token())
+async def list_time_formats(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List available time formats.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_time_formats(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
 async def get_next_number(key: str, user_id: str = "", model_id: str = "", ctx: Context = None) -> dict[str, Any]:
@@ -322,9 +338,13 @@ async def list_all_companies(include_all_fields: bool = False, ctx: Context = No
     return {"items": json_to_toon(data)}
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
-async def list_abilities(ctx: Context = None) -> dict[str, Any]:
-    """List all available role abilities."""
-    return await get_client().list_abilities(get_user_token())
+async def list_abilities(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List all available role abilities.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_abilities(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
 async def get_recurring_invoice_frequency(frequency: str, starts_at: str, ctx: Context = None) -> dict[str, Any]:
@@ -355,24 +375,26 @@ async def get_active_exchange_rate_provider(currency_id: int, ctx: Context = Non
     return await get_client().get_active_exchange_rate_provider(currency_id, get_user_token())
 
 @mcp.tool(tags={"read", "advanced", "invoiceshelf"})
-async def list_used_currencies_for_exchange(provider_id: str = "", ctx: Context = None) -> dict[str, Any]:
+async def list_used_currencies_for_exchange(include_all_fields: bool = False, provider_id: str = "", ctx: Context = None) -> dict[str, Any]:
     """List currencies used for exchange rate lookups.
 
     Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
         provider_id: Exchange rate provider ID to filter by.
     """
-    return await get_client().list_used_currencies_for_exchange(get_user_token(), provider_id=provider_id)
+    return await get_client().list_used_currencies_for_exchange(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, provider_id=provider_id)
 
 @mcp.tool(tags={"read", "advanced", "invoiceshelf"})
-async def list_supported_currencies(driver: str, key: str, ctx: Context = None) -> dict[str, Any]:
+async def list_supported_currencies(driver: str, key: str, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List supported currencies for an exchange rate driver.
 
     Args:
         driver: Exchange rate driver: currency_freak, currency_layer, open_exchange_rate, or currency_converter.
         key: API key for the exchange rate driver.
+        include_all_fields: Default False (common fields only). Set True for all fields.
     """
     driver = ExchangeRateDriverEnum.coerce(driver)
-    return await get_client().list_supported_currencies(get_user_token(), driver=driver, key=key)
+    return await get_client().list_supported_currencies(get_user_token(), driver=driver, key=key, include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 # =============================================================================
 # Customers (6 tools)
@@ -792,9 +814,13 @@ async def change_invoice_status(id: int, status: str, ctx: Context = None) -> di
     return await get_client().change_invoice_status(id, {"status": status}, get_user_token())
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
-async def list_invoice_templates(ctx: Context = None) -> dict[str, Any]:
-    """List available invoice templates."""
-    return await get_client().list_invoice_templates(get_user_token())
+async def list_invoice_templates(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List available invoice templates.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_invoice_templates(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
 async def get_invoice_send_preview(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
@@ -1011,9 +1037,13 @@ async def convert_estimate_to_invoice(id: int, ctx: Context = None) -> dict[str,
     return await get_client().convert_estimate_to_invoice(id, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"read", "basic", "invoiceshelf"})
-async def list_estimate_templates(ctx: Context = None) -> dict[str, Any]:
-    """List available estimate templates."""
-    return await get_client().list_estimate_templates(get_user_token())
+async def list_estimate_templates(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
+    """List available estimate templates.
+
+    Args:
+        include_all_fields: Default False (common fields only). Set True for all fields.
+    """
+    return await get_client().list_estimate_templates(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
 async def get_estimate_send_preview(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:

@@ -334,7 +334,69 @@ def _assert_deleted(data: Any) -> str | None:
         return f"Expected dict response, got {type(data).__name__}"
     if data.get("deleted") is not True:
         return f"Expected 'deleted': true, got {data!r}"
+    if set(data.keys()) != {"deleted", "id"}:
+        return f"Expected exactly keys (deleted, id), got {set(data.keys())}"
+    if data.get("id") is None:
+        return f"Expected non-null 'id', got {data!r}"
     return None
+
+
+COMMON_CUSTOMER: set[str] = {"id", "name", "email", "currency_id", "phone"}
+
+
+def _assert_has_full_fields(data: Any) -> str | None:
+    """Verify the response includes fields beyond COMMON_CUSTOMER."""
+    if not isinstance(data, dict):
+        return f"Expected dict, got {type(data).__name__}"
+    if not set(data.keys()).issuperset(COMMON_CUSTOMER):
+        missing = COMMON_CUSTOMER - set(data.keys())
+        return f"Missing common customer keys: {missing}"
+    extra = set(data.keys()) - COMMON_CUSTOMER
+    if not extra:
+        return "Response has no fields beyond common set (include_all_fields not honored)"
+    return None
+
+
+def _assert_common_only(data: Any) -> str | None:
+    """Verify the response is limited to COMMON_CUSTOMER fields."""
+    if not isinstance(data, dict):
+        return f"Expected dict, got {type(data).__name__}"
+    if not set(data.keys()).issubset(COMMON_CUSTOMER):
+        extra = set(data.keys()) - COMMON_CUSTOMER
+        return f"Response contains fields outside COMMON_CUSTOMER: {extra}"
+    return None
+
+
+def static_conformance_guard() -> list[dict[str, str]]:
+    """Scan src/main.py and verify every tool follows include_all_fields transmission rules."""
+    src_path = Path(__file__).with_name("main.py")
+    text = src_path.read_text(encoding="utf-8")
+    failures: list[dict[str, str]] = []
+    for name in static_tool_names():
+        # Find the tool block: from the def line to before the next decorator or end-of-file
+        m = re.search(
+            rf"(async def {re.escape(name)}\s*\(.*?\n)(.*?)(?=\n@mcp\.tool|\Z)",
+            text, re.DOTALL
+        )
+        if not m:
+            continue
+        sig = m.group(1)
+        body = m.group(2)
+        block = sig + body
+
+        if name.startswith("list_"):
+            if "include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False" not in block:
+                failures.append({"tool": name, "reason": "bulk list must gate include_all_fields on ALLOW_ALL_AGGREGATE"})
+        elif name.startswith("get_") and name.endswith("_by_id"):
+            if "include_all_fields=include_all_fields" not in block:
+                failures.append({"tool": name, "reason": "single get must pass include_all_fields=include_all_fields"})
+        elif name.startswith(("create_", "update_", "clone_", "convert_", "duplicate_")):
+            if "include_all_fields=ALLOW_ALL_AGGREGATE" not in block:
+                failures.append({"tool": name, "reason": "create/update must pass include_all_fields=ALLOW_ALL_AGGREGATE"})
+        elif name.startswith("delete_") and name.endswith("_by_id"):
+            if 'return {"deleted": True, "id": id}' not in block:
+                failures.append({"tool": name, "reason": "delete must return simple confirmation"})
+    return failures
 
 
 def _assert_cloned(data: Any, original_id: Any) -> str | None:
@@ -919,6 +981,94 @@ async def main():
             {"driver": "nonsense", "key": "test"})
         await _reject("E15 update_tax_type bad compound_tax", "update_tax_type",
             {"id": 1, "compound_tax": "banana"})
+
+        # ------------------------------------------------------------------
+        # Phase 4c: include_all_fields Semantics
+        # ------------------------------------------------------------------
+        log("\n=== Phase 4c: include_all_fields Semantics ===")
+        cust_id = IDS.get("customer_fixture")
+        if cust_id:
+            # F1: Single get — include_all_fields=True returns full fields (rule 2)
+            full_cust = await run_test(session, "F1 get_customer_by_id all_fields True",
+                "get_customer_by_id", {"id": cust_id, "include_all_fields": True},
+                assert_fn=_assert_has_full_fields)
+            # F2: Single get — default (False) returns only common fields (rule 2)
+            await run_test(session, "F2 get_customer_by_id all_fields False",
+                "get_customer_by_id", {"id": cust_id},
+                assert_fn=_assert_common_only)
+            # F3: Bulk list — include_all_fields=True returns full fields (rule 1)
+            list_full = await run_test(session, "F3 list_all_customers all_fields True",
+                "list_all_customers", {"include_all_fields": True, "page_size": 10},
+                assert_fn=_assert_list_shape)
+            if list_full:
+                items = get_list_items(list_full)
+                if items and isinstance(items[0], dict):
+                    err = _assert_has_full_fields(items[0])
+                    if err:
+                        results.append({"label": "F3 list_all_customers item has full fields",
+                            "tool": "list_all_customers", "status": "FAILED", "reason": err})
+                        log(f"  FAIL F3 list_all_customers item: {err}")
+                    else:
+                        results.append({"label": "F3 list_all_customers item has full fields",
+                            "tool": "list_all_customers", "status": "PASSED"})
+                        log("  PASS F3 list_all_customers item has full fields")
+            # F4: Bulk list — default returns only common fields (rule 1)
+            list_default = await run_test(session, "F4 list_all_customers all_fields False",
+                "list_all_customers", {"page_size": 10},
+                assert_fn=_assert_list_shape)
+            if list_default:
+                items = get_list_items(list_default)
+                if items and isinstance(items[0], dict):
+                    err = _assert_common_only(items[0])
+                    if err:
+                        results.append({"label": "F4 list_all_customers item common only",
+                            "tool": "list_all_customers", "status": "FAILED", "reason": err})
+                        log(f"  FAIL F4 list_all_customers item: {err}")
+                    else:
+                        results.append({"label": "F4 list_all_customers item common only",
+                            "tool": "list_all_customers", "status": "PASSED"})
+                        log("  PASS F4 list_all_customers item common only")
+            # F5: create returns full fields via ALLOW_ALL_AGGREGATE passthrough (rule 3)
+            fname = make_name("IAF")
+            created = await run_test(session, "F5 create_customer returns full fields",
+                "create_customer", {"name": fname, "email": f"{rid}-iaf@example.com"},
+                assert_fn=_assert_has_full_fields)
+            cid = _int_id(_dict_id(created))
+            if cid:
+                dtool = "delete_customers_by_id"
+                dresult = await session.call_tool(dtool, {"id": cid})
+                exercised_tools.add(dtool)
+                derr = is_error(dresult)
+                if derr:
+                    results.append({"label": "F5a cleanup delete", "tool": dtool,
+                        "status": "FAILED", "reason": derr})
+                    log(f"  FAIL F5a cleanup delete: {derr}")
+                else:
+                    ddata = extract_content(dresult)
+                    del_err = _assert_deleted(ddata)
+                    if del_err:
+                        results.append({"label": "F5a cleanup delete shape", "tool": dtool,
+                            "status": "FAILED", "reason": del_err})
+                        log(f"  FAIL F5a cleanup delete shape: {del_err}")
+                    else:
+                        results.append({"label": "F5a cleanup delete", "tool": dtool,
+                            "status": "PASSED", "data": ddata})
+                        log(f"  PASS F5a cleanup delete (exact shape verified)")
+        else:
+            log("  SKIP Phase 4c: no customer_fixture available")
+
+        # Static conformance guard
+        log("\n=== Static Conformance Guard ===")
+        guard_failures = static_conformance_guard()
+        if guard_failures:
+            for gf in guard_failures:
+                results.append({"label": f"CONFORM {gf['tool']}", "tool": gf['tool'],
+                    "status": "FAILED", "reason": gf['reason']})
+                log(f"  FAIL CONFORM {gf['tool']}: {gf['reason']}")
+        else:
+            results.append({"label": "CONFORM all tools", "tool": "static_analysis",
+                "status": "PASSED", "data": {"checked": len(static_tool_names())}})
+            log(f"  PASS CONFORM: all {len(static_tool_names())} tools follow include_all_fields rules")
 
         # ------------------------------------------------------------------
         # Phase 4 Cleanup: Delete all Phase 4 created resources unconditionally

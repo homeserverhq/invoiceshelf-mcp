@@ -22,6 +22,12 @@ COMMON_FIELDS: dict[str, set[str]] = {
     "role": {"id", "name", "title"},
     "recurring_invoice": {"id", "customer_id", "frequency", "status", "total"},
     "company": {"id", "name", "slug", "owner_id"},
+    "timezone": {"value", "key"},
+    "date_format": {"display_date", "carbon_format_value", "moment_format_value"},
+    "time_format": {"display_time", "carbon_format_value", "moment_format_value"},
+    "ability": {"name", "ability", "model"},
+    "invoice_template": {"name"},
+    "estimate_template": {"name"},
 }
 
 PREFIX = "/api/v1"
@@ -258,9 +264,12 @@ class InvoiceShelfClient:
         data = await self.post(f"{PREFIX}/invoices/{invoice_id}/status", api_key, json=payload)
         return self._unwrap(data)
 
-    async def list_invoice_templates(self, api_key: Optional[str] = None) -> Any:
+    async def list_invoice_templates(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/invoices/templates", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("invoiceTemplates"), list):
+            result["invoiceTemplates"] = _filter_fields(result["invoiceTemplates"], COMMON_FIELDS["invoice_template"])
+        return result
 
     async def get_invoice_send_preview(self, invoice_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
         params = {k: v for k, v in payload.items() if v}
@@ -312,9 +321,12 @@ class InvoiceShelfClient:
         data = await self.post(f"{PREFIX}/estimates/{estimate_id}/convert-to-invoice", api_key)
         return self._apply(data, api_key, include_all_fields, "invoice")
 
-    async def list_estimate_templates(self, api_key: Optional[str] = None) -> Any:
+    async def list_estimate_templates(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/estimates/templates", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("estimateTemplates"), list):
+            result["estimateTemplates"] = _filter_fields(result["estimateTemplates"], COMMON_FIELDS["estimate_template"])
+        return result
 
     async def get_estimate_send_preview(self, estimate_id: int, payload: dict[str, Any], api_key: Optional[str] = None) -> Any:
         params = {k: v for k, v in payload.items() if v}
@@ -597,9 +609,12 @@ class InvoiceShelfClient:
             result = _filter_fields(result, COMMON_FIELDS.get("currency", {"id", "name", "code"}))
         return _denormalize_response(result)
 
-    async def list_used_currencies(self, api_key: Optional[str] = None) -> Any:
+    async def list_used_currencies(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/currencies/used", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("currencies"), list):
+            result["currencies"] = _filter_fields(result["currencies"], {"id", "name", "code"})
+        return result
 
     async def list_all_countries(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/countries", api_key)
@@ -608,17 +623,26 @@ class InvoiceShelfClient:
             result = _filter_fields(result, {"id", "name", "code"})
         return _denormalize_response(result)
 
-    async def list_timezones(self, api_key: Optional[str] = None) -> Any:
+    async def list_timezones(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/timezones", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("time_zones"), list):
+            result["time_zones"] = _filter_fields(result["time_zones"], COMMON_FIELDS["timezone"])
+        return result
 
-    async def list_date_formats(self, api_key: Optional[str] = None) -> Any:
+    async def list_date_formats(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/date/formats", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("date_formats"), list):
+            result["date_formats"] = _filter_fields(result["date_formats"], COMMON_FIELDS["date_format"])
+        return result
 
-    async def list_time_formats(self, api_key: Optional[str] = None) -> Any:
+    async def list_time_formats(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/time/formats", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("time_formats"), list):
+            result["time_formats"] = _filter_fields(result["time_formats"], COMMON_FIELDS["time_format"])
+        return result
 
     async def get_next_number(self, api_key: Optional[str] = None, key: str = "", user_id: str = "", model_id: str = "") -> Any:
         params = {"key": key}
@@ -645,9 +669,12 @@ class InvoiceShelfClient:
             result = _filter_fields(result, COMMON_FIELDS["company"])
         return _denormalize_response(result)
 
-    async def list_abilities(self, api_key: Optional[str] = None) -> Any:
+    async def list_abilities(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/abilities", api_key)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict) and isinstance(result.get("abilities"), list):
+            result["abilities"] = _filter_fields(result["abilities"], COMMON_FIELDS["ability"])
+        return result
 
     async def get_recurring_invoice_frequency(self, api_key: Optional[str] = None, frequency: str = "", starts_at: str = "") -> Any:
         params = {"frequency": frequency, "starts_at": _normalize_datetime(starts_at) if starts_at else starts_at}
@@ -662,12 +689,21 @@ class InvoiceShelfClient:
         data = await self.get(f"{PREFIX}/currencies/{currency_id}/active-provider", api_key)
         return self._unwrap(data)
 
-    async def list_used_currencies_for_exchange(self, api_key: Optional[str] = None, provider_id: str = "") -> Any:
+    async def list_used_currencies_for_exchange(self, api_key: Optional[str] = None, include_all_fields: bool = False, provider_id: str = "") -> Any:
         params = {"provider_id": provider_id} if provider_id else None
         data = await self.get(f"{PREFIX}/used-currencies", api_key, params=params)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, dict):
+            common = {"id", "name", "code"}
+            for k in ("allUsedCurrencies", "activeUsedCurrencies"):
+                if isinstance(result.get(k), list):
+                    result[k] = _filter_fields(result[k], common)
+        return result
 
-    async def list_supported_currencies(self, api_key: Optional[str] = None, driver: str = "", key: str = "") -> Any:
+    async def list_supported_currencies(self, api_key: Optional[str] = None, include_all_fields: bool = False, driver: str = "", key: str = "") -> Any:
         params = {"driver": driver, "key": key}
         data = await self.get(f"{PREFIX}/supported-currencies", api_key, params=params)
-        return self._unwrap(data)
+        result = self._unwrap(data)
+        if not include_all_fields and isinstance(result, list):
+            result = _filter_fields(result, {"id", "name", "code"})
+        return result
