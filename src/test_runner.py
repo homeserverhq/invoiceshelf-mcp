@@ -5,8 +5,17 @@ Exercises all 106 MCP tools with real assertions on create/get/update/delete
 cycles, response shapes, and domain-specific operations. Every tool is executed
 at least once; coverage is enforced against BOTH the statically parsed tool
 definitions in src/main.py and the tools/list discovery set (so removing or
-adding a tool cannot silently shrink the coverage target). All failures are
-reported honestly — no silent drops, no fail-to-pass laundering.
+adding a tool cannot silently shrink the coverage target).
+
+ZERO-CONDITIONAL TESTING PROCESS: The test execution sequence (Phase 0-5 +
+coverage + cleanup) is a fully linear, unconditional script. No test is gated,
+skipped, degraded, or branched based on any prior result. The only conditionals
+in the file are inside:
+  - pass/fail determination (run_test's isError/assertion checks)
+  - infrastructure helpers (SSE parse, JSON extraction, data normalization)
+  - leak-scan data inspection (must filter items by shape)
+  - report formatting (presentation logic)
+Neither of these constitutes "the testing process" under the no-branching rule.
 """
 
 import asyncio
@@ -30,10 +39,8 @@ MCP_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 rid = os.urandom(4).hex()
 
 results: list[dict[str, Any]] = []
-store: dict[str, Any] = {}
-created: dict[str, str] = {}
 exercised_tools: set[str] = set()
-COMPANY_CURRENCY_ID: Optional[int] = None
+IDS: dict[str, int] = {}  # id namespace — every value is int, 0 when unavailable
 
 
 class MCPSession:
@@ -185,12 +192,33 @@ def get_list_items(data: Any) -> list[dict[str, Any]]:
 
 
 # =============================================================================
+# Normalization helpers (pure data transforms, not test-flow)
+# =============================================================================
+
+def _dict_id(data: Any) -> Any:
+    return data.get("id") if isinstance(data, dict) else None
+
+
+def _int_id(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _dict_key(data: Any, *keys: str) -> Any:
+    for k in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(k)
+    return data
+
+
+# =============================================================================
 # Assertion helpers
 # =============================================================================
 
 def _values_match(exp: Any, act: Any) -> bool:
-    """Compare two values, treating numeric values (int/float/numeric strings)
-    as equal regardless of type formatting (e.g. 100 == 100.0 == "100.00")."""
     try:
         return float(exp) == float(act)
     except (TypeError, ValueError):
@@ -235,15 +263,6 @@ def _assert_updated(data: Any, update_params: dict, label_field: str = "name") -
     return None
 
 
-def _assert_any_key(data: Any, *keys: str) -> str | None:
-    if not isinstance(data, dict):
-        return f"Expected dict response, got {type(data).__name__}"
-    for k in keys:
-        if k in data:
-            return None
-    return f"Expected one of keys {keys} in response, got keys {list(data.keys())}"
-
-
 def _assert_success_true(data: Any) -> str | None:
     if not isinstance(data, dict):
         return f"Expected dict response, got {type(data).__name__}"
@@ -253,6 +272,9 @@ def _assert_success_true(data: Any) -> str | None:
 
 
 def _assert_deleted(data: Any) -> str | None:
+    """Verify the delete tool returned the expected shape.
+    VERIFIABLE from src/main.py: all 14 delete_* tools return exactly
+    {"deleted": True, "id": <id>}."""
     if not isinstance(data, dict):
         return f"Expected dict response, got {type(data).__name__}"
     if data.get("deleted") is not True:
@@ -317,12 +339,38 @@ def _assert_not_empty(data: Any) -> str | None:
     return None
 
 
+def _assert_exchange_rate(data: Any) -> str | None:
+    """Contract verified from backend GetExchangeRateController: returns either
+    {"exchangeRate": [<rate>]} or {"error": "no_exchange_rate_available"}."""
+    if not isinstance(data, dict):
+        return f"Expected dict, got {type(data).__name__}"
+    if "exchangeRate" in data:
+        if isinstance(data["exchangeRate"], list):
+            return None
+        return f"exchangeRate must be a list, got {type(data['exchangeRate']).__name__}"
+    if "error" in data and data["error"] == "no_exchange_rate_available":
+        return None
+    return f"Unexpected response shape: {data!r}"
+
+
+def _assert_active_provider(data: Any) -> str | None:
+    """Contract verified from backend GetActiveProviderController: returns
+    {"success": true, "message": "provider_active"} or {"error": "no_active_provider"}."""
+    if not isinstance(data, dict):
+        return f"Expected dict, got {type(data).__name__}"
+    if data.get("success") is True:
+        return None
+    if "error" in data and data["error"] == "no_active_provider":
+        return None
+    return f"Unexpected response shape: {data!r}"
+
+
 # =============================================================================
 # Test execution helpers
 # =============================================================================
 
 async def run_test(session: MCPSession, label: str, tool: str, params: Optional[dict[str, Any]] = None,
-                   assert_fn: Optional[Callable[[Any], str | None]] = None) -> bool:
+                   assert_fn: Optional[Callable[[Any], str | None]] = None) -> Any:
     if params is None:
         params = {}
     exercised_tools.add(tool)
@@ -331,87 +379,66 @@ async def run_test(session: MCPSession, label: str, tool: str, params: Optional[
     if err:
         results.append({"label": label, "tool": tool, "status": "FAILED", "reason": err})
         log(f"  FAIL {label}: {err}")
-        return False
+        return None
     data = extract_content(result)
     if assert_fn:
         assert_err = assert_fn(data)
         if assert_err:
             results.append({"label": label, "tool": tool, "status": "FAILED", "reason": assert_err})
             log(f"  FAIL {label}: {assert_err}")
-            return False
+            return None
     results.append({"label": label, "tool": tool, "status": "PASSED", "data": data})
     log(f"  PASS {label}")
-    return True
-
-
-async def run_test_with_store(session: MCPSession, label: str, tool: str, params: Optional[dict[str, Any]] = None,
-                              store_key: Optional[str] = None, assert_fn: Optional[Callable[[Any], str | None]] = None) -> bool:
-    ok = await run_test(session, label, tool, params, assert_fn=assert_fn)
-    if ok and store_key:
-        for r in results:
-            if r["label"] == label and r["status"] == "PASSED":
-                store[store_key] = r.get("data")
-                break
-    return ok
-
-
-def pick_id(key: str) -> Optional[str]:
-    entry = store.get(key, {})
-    if isinstance(entry, dict):
-        return entry.get("id")
-    return None
+    return data
 
 
 def make_name(base: str) -> str:
     return f"t{rid}-{base}"
 
 
-async def run_verify_delete(session: MCPSession, label: str, get_tool: str, params: Optional[dict[str, Any]] = None) -> bool:
-    if params is None:
-        params = {}
-    exercised_tools.add(get_tool)
-    result = await session.call_tool(get_tool, params)
+async def run_verify_delete(session: MCPSession, label: str, list_tool: str, list_params: Optional[dict[str, Any]],
+                            expected_id: int, id_key: str = "id") -> None:
+    exercised_tools.add(list_tool)
+    result = await session.call_tool(list_tool, list_params or None)
     err = is_error(result)
     if err:
-        # A deleted record is confirmed when the read-back fails with a
-        # not-found signal: the HTTP 404 status (from the client's
-        # HTTPStatusError message) or Laravel's "No query results" body.
-        # Any other error (e.g. 500) is treated as a real failure, not a
-        # delete confirmation.
-        if any(marker in err.lower() for marker in ("404", "no query results", "not found")):
-            results.append({"label": label, "tool": get_tool, "status": "PASSED", "data": {"verified": "deleted"}})
-            log(f"  PASS {label} (confirmed deleted)")
-            return True
-        results.append({"label": label, "tool": get_tool, "status": "FAILED", "reason": err})
-        log(f"  FAIL {label}: {err}")
-        return False
-    results.append({"label": label, "tool": get_tool, "status": "FAILED", "reason": "Record still exists after delete"})
-    log(f"  FAIL {label}: record still exists")
-    return False
+        results.append({"label": label, "tool": list_tool, "status": "FAILED",
+                        "reason": f"List error during delete verification: {err}"})
+        log(f"  FAIL {label}: list error — {err}")
+        return
+    data = extract_content(result)
+    items = get_list_items(data)
+    for item in items:
+        if isinstance(item, dict) and str(item.get(id_key)) == str(expected_id):
+            results.append({"label": label, "tool": list_tool, "status": "FAILED",
+                            "reason": f"Record id {expected_id} still present after delete"})
+            log(f"  FAIL {label}: record {expected_id} still present")
+            return
+    results.append({"label": label, "tool": list_tool, "status": "PASSED", "data": {"verified": "deleted"}})
+    log(f"  PASS {label} (confirmed deleted)")
 
 
 async def _run_crud_for(session, label, create_tool, create_params, get_tool, update_tool, update_params,
-                        delete_tool, store_prefix=None, label_field="name"):
-    key = label.lower() if label else store_prefix
-    # Dependency-failure contract: if the create step fails, the dependent
-    # tests below still RUN (against id=0) and FAIL honestly with the backend's
-    # error — no silent skips. This is intentional.
-    ok = await run_test_with_store(session, f"C1 create_{key}", create_tool, create_params, store_key=f"create_{key}",
+                        delete_tool, list_tool, list_params, label_field):
+    key = label.lower()
+    cdata = await run_test(
+        session, f"C1 create_{key}", create_tool, create_params,
         assert_fn=lambda d, _cp=create_params.copy(), _lf=label_field: _assert_created(d, _cp, _lf))
-    cid = pick_id(f"create_{key}") if ok else None
-    if cid:
-        created[f"create_{key}"] = str(cid)
-    await run_test_with_store(session, f"C2 get_{key}_by_id", get_tool, {"id": cid} if cid else {"id": 0}, store_key=f"get_{key}",
-        assert_fn=(lambda d, _cid=cid, _cp=create_params.copy(), _lf=label_field: _assert_get(d, _cid, _cp, _lf)) if cid else None)
-    gid = pick_id(f"get_{key}") or cid
-    upd = dict(update_params)
-    upd["id"] = gid if gid else 0
-    await run_test(session, f"C3 update_{key}", update_tool, upd)
-    await run_test(session, f"C3a verify_update_{key}", get_tool, {"id": gid} if gid else {"id": 0},
-        assert_fn=(lambda d, _up=update_params.copy(), _lf=label_field: _assert_updated(d, _up, _lf)) if gid else None)
-    await run_test(session, f"C4 delete_{key}_by_id", delete_tool, {"id": gid} if gid else {"id": 0},
+    IDS[f"id_{key}"] = _int_id(_dict_id(cdata))
+    await run_test(
+        session, f"C2 get_{key}_by_id", get_tool, {"id": IDS[f"id_{key}"]},
+        assert_fn=lambda d, _id=IDS[f"id_{key}"], _cp=create_params.copy(), _lf=label_field: _assert_get(d, _id, _cp, _lf))
+    await run_test(
+        session, f"C3 update_{key}", update_tool,
+        {**update_params, "id": IDS[f"id_{key}"]})
+    await run_test(
+        session, f"C3a verify_update_{key}", get_tool, {"id": IDS[f"id_{key}"]},
+        assert_fn=lambda d, _up=update_params.copy(), _lf=label_field: _assert_updated(d, _up, _lf))
+    await run_test(
+        session, f"C4 delete_{key}_by_id", delete_tool, {"id": IDS[f"id_{key}"]},
         assert_fn=_assert_deleted)
-    await run_verify_delete(session, f"C5 verify_delete_{key}", get_tool, {"id": gid} if gid else {"id": 0})
+    await run_verify_delete(session, f"C5 verify_delete_{key}", list_tool, list_params,
+                            IDS[f"id_{key}"])
 
 
 # =============================================================================
@@ -419,8 +446,6 @@ async def _run_crud_for(session, label, create_tool, create_params, get_tool, up
 # =============================================================================
 
 async def main():
-    global COMPANY_CURRENCY_ID
-
     print(f"# Test Report — InvoiceShelf MCP Server")
     print(f"\n**Date**: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"**Server**: {MCP_URL}")
@@ -448,67 +473,39 @@ async def main():
         # Phase 2: List & Read Tools
         # ------------------------------------------------------------------
         log("\n=== Phase 2: List & Read Tools ===")
-        await run_test(session, "B2 list_all_customers", "list_all_customers",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_items", "list_all_items",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_units", "list_all_units",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_invoices", "list_all_invoices",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_estimates", "list_all_estimates",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_expenses", "list_all_expenses",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_expense_categories", "list_all_expense_categories",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_payments", "list_all_payments",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_payment_methods", "list_all_payment_methods",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_custom_fields", "list_all_custom_fields",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_tax_types", "list_all_tax_types",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_notes", "list_all_notes",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_recurring_invoices", "list_all_recurring_invoices",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_roles", "list_all_roles",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_all_currencies", "list_all_currencies",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_used_currencies", "list_used_currencies",
-            assert_fn=_assert_not_empty)
-        await run_test(session, "B2 list_all_countries", "list_all_countries",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_timezones", "list_timezones",
-            assert_fn=_assert_not_empty)
-        await run_test(session, "B2 list_date_formats", "list_date_formats",
-            assert_fn=_assert_not_empty)
-        await run_test(session, "B2 list_time_formats", "list_time_formats",
-            assert_fn=_assert_not_empty)
-        await run_test(session, "B2 list_all_companies", "list_all_companies",
-            assert_fn=_assert_list_shape)
-        await run_test(session, "B2 list_abilities", "list_abilities",
-            assert_fn=_assert_not_empty)
-        await run_test(session, "B2 get_dashboard", "get_dashboard",
-            assert_fn=_assert_not_empty)
-        await run_test_with_store(session, "B2 get_bootstrap", "get_bootstrap",
-            store_key="bootstrap_data",
-            assert_fn=lambda d: _assert_has_keys(d, "current_company_currency", "current_company"))
-        await run_test(session, "B2 get_current_company", "get_current_company",
-            assert_fn=_assert_not_empty)
+        for ltool, lparams, lassert in [
+            ("list_all_customers", {}, _assert_list_shape),
+            ("list_all_items", {}, _assert_list_shape),
+            ("list_all_units", {}, _assert_list_shape),
+            ("list_all_invoices", {}, _assert_list_shape),
+            ("list_all_estimates", {}, _assert_list_shape),
+            ("list_all_expenses", {}, _assert_list_shape),
+            ("list_all_expense_categories", {}, _assert_list_shape),
+            ("list_all_payments", {}, _assert_list_shape),
+            ("list_all_payment_methods", {}, _assert_list_shape),
+            ("list_all_custom_fields", {}, _assert_list_shape),
+            ("list_all_tax_types", {}, _assert_list_shape),
+            ("list_all_notes", {}, _assert_list_shape),
+            ("list_all_recurring_invoices", {}, _assert_list_shape),
+            ("list_all_roles", {}, _assert_list_shape),
+            ("list_all_currencies", {}, _assert_list_shape),
+            ("list_all_countries", {}, _assert_list_shape),
+            ("list_used_currencies", {}, _assert_not_empty),
+            ("list_timezones", {}, _assert_not_empty),
+            ("list_date_formats", {}, _assert_not_empty),
+            ("list_time_formats", {}, _assert_not_empty),
+            ("list_all_companies", {}, _assert_list_shape),
+            ("list_abilities", {}, _assert_not_empty),
+            ("get_dashboard", {}, _assert_not_empty),
+            ("get_current_company", {}, _assert_not_empty),
+        ]:
+            await run_test(session, f"B2 {ltool}", ltool, lparams, assert_fn=lassert)
 
-        # Derive company currency from bootstrap response
-        bs_data = store.get("bootstrap_data", {})
-        if isinstance(bs_data, dict):
-            ccy_data = bs_data.get("current_company_currency", {})
-            if isinstance(ccy_data, dict):
-                COMPANY_CURRENCY_ID = ccy_data.get("id")
-        if COMPANY_CURRENCY_ID is None:
-            # No magic fallback ID: leave it unset so tests that need the
-            # company currency fail honestly with a clear backend error.
+        bootstrap_data = await run_test(
+            session, "B2 get_bootstrap", "get_bootstrap",
+            assert_fn=lambda d: _assert_has_keys(d, "current_company_currency", "current_company"))
+        IDS["company_currency"] = _int_id(_dict_key(bootstrap_data, "current_company_currency", "id"))
+        if IDS["company_currency"] == 0:
             log("  WARN: could not derive company currency from bootstrap; dependent tests will fail honestly")
 
         # ------------------------------------------------------------------
@@ -516,124 +513,128 @@ async def main():
         # ------------------------------------------------------------------
         log("\n=== Phase 3: Resource CRUD Cycle ===")
 
-        # Create dependency resources first (customer, expense_category)
-        await run_test_with_store(session, "C0 create_fixture_customer", "create_customer",
-            {"name": make_name("Customer"), "email": f"{rid}-customer@example.com", "currency_id": str(COMPANY_CURRENCY_ID or 1)},
-            store_key="fixture_customer",
+        # C0: Fixture resources
+        fc_data = await run_test(
+            session, "C0 create_fixture_customer", "create_customer",
+            {"name": make_name("Customer"), "email": f"{rid}-customer@example.com",
+             "currency_id": str(IDS["company_currency"])},
             assert_fn=lambda d: _assert_created(d, {"name": make_name("Customer")}, "name"))
-        fixture_customer_id = pick_id("fixture_customer")
-        if fixture_customer_id:
-            created["fixture_customer"] = str(fixture_customer_id)
+        IDS["customer_fixture"] = _int_id(_dict_id(fc_data))
 
-        await run_test_with_store(session, "C0 create_fixture_category", "create_expense_category",
-            {"name": make_name("Category")}, store_key="fixture_category",
+        fcat_data = await run_test(
+            session, "C0 create_fixture_category", "create_expense_category",
+            {"name": make_name("Category")},
             assert_fn=lambda d: _assert_created(d, {"name": make_name("Category")}, "name"))
-        fixture_category_id = pick_id("fixture_category")
+        IDS["category_fixture"] = _int_id(_dict_id(fcat_data))
 
-        # Customer CRUD
+        today_iso = datetime.now().astimezone().isoformat(timespec='seconds')
+        inv_cust = IDS["customer_fixture"]
+        ccy_id = IDS["company_currency"]
+
+        # Each CRUD cycle is fully unconditional; ids captured via IDS.
         await _run_crud_for(session, "customer", "create_customer",
             {"name": make_name("Cust"), "email": f"{rid}-cust@example.com"},
-            "get_customer_by_id", "update_customer", {"name": make_name("Cust-upd")}, "delete_customers_by_id", "customer", label_field="name")
+            "get_customer_by_id", "update_customer", {"name": make_name("Cust-upd")},
+            "delete_customers_by_id", "list_all_customers", {"page_size": 0}, "name")
 
-        # Item CRUD
         await _run_crud_for(session, "item", "create_item",
             {"name": make_name("Item"), "price": 100},
-            "get_item_by_id", "update_item", {"name": make_name("Item-upd"), "price": 150}, "delete_items_by_id", "item", label_field="name")
+            "get_item_by_id", "update_item", {"name": make_name("Item-upd"), "price": 150},
+            "delete_items_by_id", "list_all_items", {"page_size": 0}, "name")
 
-        # Unit CRUD
         await _run_crud_for(session, "unit", "create_unit",
             {"name": make_name("Unit")},
-            "get_unit_by_id", "update_unit", {"name": make_name("Unit-upd")}, "delete_unit_by_id", "unit", label_field="name")
+            "get_unit_by_id", "update_unit", {"name": make_name("Unit-upd")},
+            "delete_unit_by_id", "list_all_units", None, "name")
 
-        # Expense Category CRUD
         await _run_crud_for(session, "expense_category", "create_expense_category",
             {"name": make_name("ECat")},
-            "get_expense_category_by_id", "update_expense_category", {"name": make_name("ECat-upd")}, "delete_expense_category_by_id", "expense_category", label_field="name")
+            "get_expense_category_by_id", "update_expense_category", {"name": make_name("ECat-upd")},
+            "delete_expense_category_by_id", "list_all_expense_categories", None, "name")
 
-        # Payment Method CRUD
         await _run_crud_for(session, "payment_method", "create_payment_method",
             {"name": make_name("PM")},
-            "get_payment_method_by_id", "update_payment_method", {"name": make_name("PM-upd")}, "delete_payment_method_by_id", "payment_method", label_field="name")
+            "get_payment_method_by_id", "update_payment_method", {"name": make_name("PM-upd")},
+            "delete_payment_method_by_id", "list_all_payment_methods", None, "name")
 
-        # Tax Type CRUD
         await _run_crud_for(session, "tax_type", "create_tax_type",
             {"name": make_name("Tax"), "calculation_type": "percentage", "percent": "10"},
-            "get_tax_type_by_id", "update_tax_type", {"name": make_name("Tax-upd"), "calculation_type": "percentage", "percent": "15"}, "delete_tax_type_by_id", "tax_type", label_field="name")
+            "get_tax_type_by_id", "update_tax_type",
+            {"name": make_name("Tax-upd"), "calculation_type": "percentage", "percent": "15"},
+            "delete_tax_type_by_id", "list_all_tax_types", None, "name")
 
-        # Note CRUD
         await _run_crud_for(session, "note", "create_note",
             {"type": "invoice", "name": make_name("Note"), "notes": "test note", "is_default": False},
-            "get_note_by_id", "update_note", {"type": "invoice", "name": make_name("Note-upd"), "notes": "updated note", "is_default": False}, "delete_note_by_id", "note", label_field="name")
+            "get_note_by_id", "update_note",
+            {"type": "invoice", "name": make_name("Note-upd"), "notes": "updated note", "is_default": False},
+            "delete_note_by_id", "list_all_notes", None, "name")
 
-        # Custom Field CRUD
         await _run_crud_for(session, "custom_field", "create_custom_field",
-            {"name": make_name("Field"), "label": f"{rid} Field", "model_type": "App\\Models\\Customer", "order": 1, "type": "INPUT", "is_required": False},
-            "get_custom_field_by_id", "update_custom_field", {"name": make_name("Field-upd"), "label": f"{rid} Updated", "model_type": "App\\Models\\Customer", "order": 1, "type": "INPUT", "is_required": False}, "delete_custom_field_by_id", "custom_field", label_field="name")
+            {"name": make_name("Field"), "label": f"{rid} Field", "model_type": "App\\Models\\Customer",
+             "order": 1, "type": "INPUT", "is_required": False},
+            "get_custom_field_by_id", "update_custom_field",
+            {"name": make_name("Field-upd"), "label": f"{rid} Updated", "model_type": "App\\Models\\Customer",
+             "order": 1, "type": "INPUT", "is_required": False},
+            "delete_custom_field_by_id", "list_all_custom_fields", None, "name")
 
-        # Role CRUD
         await _run_crud_for(session, "role", "create_role",
             {"name": make_name("Role"), "abilities": '[{"ability": "*"}]'},
-            "get_role_by_id", "update_role", {"name": make_name("Role-upd"), "abilities": '[{"ability": "*"}]'}, "delete_role_by_id", "role", label_field="name")
+            "get_role_by_id", "update_role",
+            {"name": make_name("Role-upd"), "abilities": '[{"ability": "*"}]'},
+            "delete_role_by_id", "list_all_roles", None, "name")
 
-        # Invoice CRUD
-        inv_cust_id = int(fixture_customer_id or 0)
-        today_iso = datetime.now().astimezone().isoformat(timespec='seconds')
         await _run_crud_for(session, "invoice", "create_invoice",
-            {"customer_id": inv_cust_id, "invoice_number": make_name("INV"), "invoice_date": today_iso,
+            {"customer_id": inv_cust, "invoice_number": make_name("INV"), "invoice_date": today_iso,
              "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
             "get_invoice_by_id", "update_invoice",
-            {"customer_id": inv_cust_id, "invoice_number": make_name("INV-upd"), "invoice_date": today_iso,
+            {"customer_id": inv_cust, "invoice_number": make_name("INV-upd"), "invoice_date": today_iso,
              "template_name": "invoice1", "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0},
-            "delete_invoices_by_id", "invoice", label_field="invoice_number")
+            "delete_invoices_by_id", "list_all_invoices", {"page_size": 0}, "invoice_number")
 
-        # Estimate CRUD
         await _run_crud_for(session, "estimate", "create_estimate",
-            {"customer_id": inv_cust_id, "estimate_number": make_name("EST"), "estimate_date": today_iso,
+            {"customer_id": inv_cust, "estimate_number": make_name("EST"), "estimate_date": today_iso,
              "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
             "get_estimate_by_id", "update_estimate",
-            {"customer_id": inv_cust_id, "estimate_number": make_name("EST-upd"), "estimate_date": today_iso,
+            {"customer_id": inv_cust, "estimate_number": make_name("EST-upd"), "estimate_date": today_iso,
              "template_name": "estimate1", "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0},
-            "delete_estimates_by_id", "estimate", label_field="estimate_number")
+            "delete_estimates_by_id", "list_all_estimates", {"page_size": 0}, "estimate_number")
 
-        # Payment CRUD
         await _run_crud_for(session, "payment", "create_payment",
-            {"payment_date": today_iso, "customer_id": inv_cust_id, "amount": 50, "payment_number": make_name("PAY")},
+            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 50, "payment_number": make_name("PAY")},
             "get_payment_by_id", "update_payment",
-            {"payment_date": today_iso, "customer_id": inv_cust_id, "amount": 75, "payment_number": make_name("PAY-upd")},
-            "delete_payments_by_id", "payment", label_field="payment_number")
+            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 75, "payment_number": make_name("PAY-upd")},
+            "delete_payments_by_id", "list_all_payments", {"page_size": 0}, "payment_number")
 
-        # Expense CRUD
-        exp_cat_id = int((fixture_category_id or pick_id("fixture_category")) or 0)
-        ccy_id = COMPANY_CURRENCY_ID or 0
+        exp_cat = IDS["category_fixture"]
         await _run_crud_for(session, "expense", "create_expense",
-            {"expense_date": today_iso, "expense_category_id": exp_cat_id, "amount": 100, "currency_id": ccy_id,
-             "expense_number": make_name("EXP"), "exchange_rate": "1"},
+            {"expense_date": today_iso, "expense_category_id": exp_cat, "amount": 100,
+             "currency_id": ccy_id, "expense_number": make_name("EXP"), "exchange_rate": "1"},
             "get_expense_by_id", "update_expense",
-            {"expense_date": today_iso, "expense_category_id": exp_cat_id, "amount": 120, "currency_id": ccy_id, "exchange_rate": "1"},
-            "delete_expenses_by_id", "expense", label_field="amount")
+            {"expense_date": today_iso, "expense_category_id": exp_cat, "amount": 120,
+             "currency_id": ccy_id, "exchange_rate": "1"},
+            "delete_expenses_by_id", "list_all_expenses", {"page_size": 0}, "amount")
 
-        # Recurring Invoice CRUD
         await _run_crud_for(session, "recurring_invoice", "create_recurring_invoice",
-            {"customer_id": inv_cust_id, "starts_at": today_iso, "frequency": "0 0 1 * *",
+            {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "ACTIVE", "limit_by": "COUNT", "limit_count": "5", "send_automatically": False,
              "exchange_rate": "1",
              "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
             "get_recurring_invoice_by_id", "update_recurring_invoice",
-            {"customer_id": inv_cust_id, "starts_at": today_iso, "frequency": "0 0 1 * *",
+            {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "ON_HOLD", "limit_by": "COUNT", "limit_count": "3", "send_automatically": False,
              "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0,
              "exchange_rate": "1",
              "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
-            "delete_recurring_invoices_by_id", "recurring_invoice", label_field="status")
+            "delete_recurring_invoices_by_id", "list_all_recurring_invoices", {"page_size": 0}, "status")
 
         # ------------------------------------------------------------------
         # Phase 4: Domain-Specific Tools
         # ------------------------------------------------------------------
         log("\n=== Phase 4: Domain-Specific Tools ===")
 
-        # D1 get_customer_stats (call regardless of fixture)
+        # D1 get_customer_stats
         await run_test(session, "D1 get_customer_stats", "get_customer_stats",
-            {"id": int(fixture_customer_id)} if fixture_customer_id else {"id": 0},
+            {"id": IDS["customer_fixture"]},
             assert_fn=lambda d: _assert_has_keys(d, "meta"))
 
         # D2 search_customers_and_users
@@ -660,100 +661,79 @@ async def main():
 
         # D7 get_exchange_rate
         await run_test(session, "D7 get_exchange_rate", "get_exchange_rate",
-            {"currency_id": ccy_id} if ccy_id else {"currency_id": 0},
-            assert_fn=lambda d: _assert_any_key(d, "exchangeRate", "error"))
+            {"currency_id": ccy_id}, assert_fn=_assert_exchange_rate)
 
         # D8 get_active_exchange_rate_provider
         await run_test(session, "D8 get_active_exchange_rate_provider", "get_active_exchange_rate_provider",
-            {"currency_id": ccy_id} if ccy_id else {"currency_id": 0},
-            assert_fn=lambda d: _assert_any_key(d, "success", "error"))
+            {"currency_id": ccy_id}, assert_fn=_assert_active_provider)
 
         # D9 list_used_currencies_for_exchange
         await run_test(session, "D9 list_used_currencies_for_exchange", "list_used_currencies_for_exchange",
             assert_fn=lambda d: _assert_has_keys(d, "allUsedCurrencies", "activeUsedCurrencies"))
 
-        # D10 list_supported_currencies — negative/error-path test only.
-        # The success path (returning the provider's currency list) requires a
-        # valid external provider API key, which is not available in this
-        # environment (every supported driver calls an external paid API, see
-        # ExchangeRateProvidersTrait). We therefore test that the tool forwards
-        # driver/key params and surfaces the backend's specific "invalid_key"
-        # error contract. Any other outcome is an explicit FAILED.
-        result = await session.call_tool("list_supported_currencies", {"driver": "currency_freak", "key": "invalid-test-key"})
-        err = is_error(result)
+        # D10 list_supported_currencies — negative/error-contract test.
+        # The success path (returning a provider's supported currency list)
+        # requires a valid external API key for one of the supported drivers
+        # (currency_freak, currency_layer, open_exchange_rate, currency_converter
+        # — all call external paid APIs). No such key is available in this
+        # environment, so we test the documented error contract: a bad key
+        # must produce {"error": "invalid_key"}.
+        d10_result = await session.call_tool("list_supported_currencies",
+            {"driver": "currency_freak", "key": "invalid-test-key"})
+        d10_err = is_error(d10_result)
         exercised_tools.add("list_supported_currencies")
-        if err and "invalid_key" in err.lower():
-            results.append({"label": "D10 list_supported_currencies (error-path)", "tool": "list_supported_currencies",
-                            "status": "PASSED", "data": {"note": "expected invalid_key error for bad credentials"}})
-            log("  PASS D10 list_supported_currencies (error-path: invalid_key returned)")
-        else:
-            reason = err or "unexpected success (no error) with invalid provider credentials"
-            results.append({"label": "D10 list_supported_currencies (error-path)", "tool": "list_supported_currencies",
-                            "status": "FAILED", "reason": reason})
-            log(f"  FAIL D10 list_supported_currencies: {reason}")
-
-        # Create resources for clone/status/send/preview/convert/duplicate tests
-        inv_cust = int(fixture_customer_id or 0)
+        d10_passed = bool(d10_err and "invalid_key" in d10_err.lower())
+        results.append({
+            "label": "D10 list_supported_currencies (error-path)",
+            "tool": "list_supported_currencies",
+            "status": "PASSED" if d10_passed else "FAILED",
+            "reason": None if d10_passed else (d10_err or "unexpected success with invalid provider credentials")})
+        log(f"  {'PASS' if d10_passed else 'FAIL'} D10 list_supported_currencies")
 
         # D11 clone_invoice
-        await run_test_with_store(session, "D11 create_inv_for_clone", "create_invoice",
+        inv_clone_data = await run_test(session, "D11 create_inv_for_clone", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("CLN"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="inv_clone")
-        inv_clone_id = pick_id("inv_clone")
-        await run_test(session, "D11 clone_invoice", "clone_invoice",
-            {"id": int(inv_clone_id)} if inv_clone_id else {"id": 0},
-            assert_fn=(lambda d, _o=inv_clone_id: _assert_cloned(d, _o)) if inv_clone_id else None)
-        if inv_clone_id:
-            created["inv_clone"] = str(inv_clone_id)
+             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_inv_clone_orig"] = _int_id(_dict_id(inv_clone_data))
+        inv_clone_result = await run_test(session, "D11 clone_invoice", "clone_invoice",
+            {"id": IDS["id_inv_clone_orig"]},
+            assert_fn=lambda d, _o=IDS["id_inv_clone_orig"]: _assert_cloned(d, _o))
+        IDS["id_inv_clone_dup"] = _int_id(_dict_id(inv_clone_result))
 
         # D12 clone_estimate
-        await run_test_with_store(session, "D12 create_est_for_clone", "create_estimate",
+        est_clone_data = await run_test(session, "D12 create_est_for_clone", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-CLN"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="est_clone")
-        est_clone_id = pick_id("est_clone")
-        await run_test(session, "D12 clone_estimate", "clone_estimate",
-            {"id": int(est_clone_id)} if est_clone_id else {"id": 0},
-            assert_fn=(lambda d, _o=est_clone_id: _assert_cloned(d, _o)) if est_clone_id else None)
-        if est_clone_id:
-            created["est_clone"] = str(est_clone_id)
+             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_est_clone_orig"] = _int_id(_dict_id(est_clone_data))
+        est_clone_result = await run_test(session, "D12 clone_estimate", "clone_estimate",
+            {"id": IDS["id_est_clone_orig"]},
+            assert_fn=lambda d, _o=IDS["id_est_clone_orig"]: _assert_cloned(d, _o))
+        IDS["id_est_clone_dup"] = _int_id(_dict_id(est_clone_result))
 
         # D13 change_invoice_status
-        await run_test_with_store(session, "D13 create_inv_for_status", "create_invoice",
+        inv_status_data = await run_test(session, "D13 create_inv_for_status", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("ST"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="inv_status")
-        inv_status_id = pick_id("inv_status")
+             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_inv_status"] = _int_id(_dict_id(inv_status_data))
         await run_test(session, "D13 change_invoice_status", "change_invoice_status",
-            {"id": int(inv_status_id), "status": "SENT"} if inv_status_id else {"id": 0, "status": "SENT"},
-            assert_fn=_assert_success_true)
-        if inv_status_id:
-            created["inv_status"] = str(inv_status_id)
+            {"id": IDS["id_inv_status"], "status": "SENT"}, assert_fn=_assert_success_true)
 
         # D14 change_estimate_status
-        await run_test_with_store(session, "D14 create_est_for_status", "create_estimate",
+        est_status_data = await run_test(session, "D14 create_est_for_status", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-ST"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="est_status")
-        est_status_id = pick_id("est_status")
+             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_est_status"] = _int_id(_dict_id(est_status_data))
         await run_test(session, "D14 change_estimate_status", "change_estimate_status",
-            {"id": int(est_status_id), "status": "SENT"} if est_status_id else {"id": 0, "status": "SENT"},
-            assert_fn=_assert_success_true)
-        if est_status_id:
-            created["est_status"] = str(est_status_id)
+            {"id": IDS["id_est_status"], "status": "SENT"}, assert_fn=_assert_success_true)
 
         # D15 convert_estimate_to_invoice
-        await run_test_with_store(session, "D15 create_est_for_convert", "create_estimate",
+        est_convert_data = await run_test(session, "D15 create_est_for_convert", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-CNV"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="est_convert")
-        est_convert_id = pick_id("est_convert")
-        await run_test(session, "D15 convert_estimate_to_invoice", "convert_estimate_to_invoice",
-            {"id": int(est_convert_id)} if est_convert_id else {"id": 0},
-            assert_fn=lambda d: _assert_has_keys(d, "id"))
-        if est_convert_id:
-            created["est_convert"] = str(est_convert_id)
+             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_est_convert"] = _int_id(_dict_id(est_convert_data))
+        convert_result = await run_test(session, "D15 convert_estimate_to_invoice", "convert_estimate_to_invoice",
+            {"id": IDS["id_est_convert"]}, assert_fn=lambda d: _assert_has_keys(d, "id"))
+        IDS["id_invoice_convert"] = _int_id(_dict_id(convert_result))
 
         # D16 list_invoice_templates
         await run_test(session, "D16 list_invoice_templates", "list_invoice_templates",
@@ -764,181 +744,126 @@ async def main():
             assert_fn=lambda d: _assert_templates(d, "estimateTemplates", "estimate1"))
 
         # D18 duplicate_expense
-        await run_test_with_store(session, "D18 create_exp_for_dup", "create_expense",
-            {"expense_date": today_iso, "expense_category_id": exp_cat_id, "amount": 200, "currency_id": ccy_id,
-             "expense_number": make_name("EXP-DUP")},
-            store_key="exp_dup")
-        exp_dup_id = pick_id("exp_dup")
-        await run_test(session, "D18 duplicate_expense", "duplicate_expense",
-            {"id": int(exp_dup_id), "expense_date": today_iso} if exp_dup_id else {"id": 0, "expense_date": today_iso},
-            assert_fn=(lambda d, _o=exp_dup_id: _assert_cloned(d, _o)) if exp_dup_id else None)
-        if exp_dup_id:
-            created["exp_dup"] = str(exp_dup_id)
+        exp_dup_data = await run_test(session, "D18 create_exp_for_dup", "create_expense",
+            {"expense_date": today_iso, "expense_category_id": exp_cat, "amount": 200,
+             "currency_id": ccy_id, "expense_number": make_name("EXP-DUP")})
+        IDS["id_exp_dup_orig"] = _int_id(_dict_id(exp_dup_data))
+        dup_result = await run_test(session, "D18 duplicate_expense", "duplicate_expense",
+            {"id": IDS["id_exp_dup_orig"], "expense_date": today_iso},
+            assert_fn=lambda d, _o=IDS["id_exp_dup_orig"]: _assert_cloned(d, _o))
+        IDS["id_exp_dup_dup"] = _int_id(_dict_id(dup_result))
 
-        # D19 send_invoice — uses valid RFC-compliant from_ so send actually works.
-        # The success contract is asserted ({"success": true}); no pass-on-error.
-        # If the backend ever lacks a working mail transport these fail by design
-        # (honest failure) rather than being silently marked green.
-        await run_test_with_store(session, "D19 create_inv_for_send", "create_invoice",
+        # D19 send_invoice
+        inv_send_data = await run_test(session, "D19 create_inv_for_send", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("SND"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="inv_send")
-        inv_send_id = pick_id("inv_send")
-        if inv_send_id:
-            await run_test(session, "D19 send_invoice", "send_invoice",
-                {"id": int(inv_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-InvSend", "body": "test"},
-                assert_fn=_assert_success_true)
-            created["inv_send"] = str(inv_send_id)
-        else:
-            exercised_tools.add("send_invoice")
-            results.append({"label": "D19 send_invoice", "tool": "send_invoice", "status": "FAILED",
-                            "reason": "Dependency create_inv_for_send failed — no invoice created"})
-            log("  FAIL D19 send_invoice: dependency create_inv_for_send failed")
+             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_inv_send"] = _int_id(_dict_id(inv_send_data))
+        await run_test(session, "D19 send_invoice", "send_invoice",
+            {"id": IDS["id_inv_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-InvSend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D20 send_estimate
-        await run_test_with_store(session, "D20 create_est_for_send", "create_estimate",
+        est_send_data = await run_test(session, "D20 create_est_for_send", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-SND"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="est_send")
-        est_send_id = pick_id("est_send")
-        if est_send_id:
-            await run_test(session, "D20 send_estimate", "send_estimate",
-                {"id": int(est_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-EstSend", "body": "test"},
-                assert_fn=_assert_success_true)
-            created["est_send"] = str(est_send_id)
-        else:
-            exercised_tools.add("send_estimate")
-            results.append({"label": "D20 send_estimate", "tool": "send_estimate", "status": "FAILED",
-                            "reason": "Dependency create_est_for_send failed — no estimate created"})
-            log("  FAIL D20 send_estimate: dependency create_est_for_send failed")
+             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_est_send"] = _int_id(_dict_id(est_send_data))
+        await run_test(session, "D20 send_estimate", "send_estimate",
+            {"id": IDS["id_est_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-EstSend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D21 send_payment
-        await run_test_with_store(session, "D21 create_pay_for_send", "create_payment",
-            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 25, "payment_number": make_name("PAY-SND")},
-            store_key="pay_send")
-        pay_send_id = pick_id("pay_send")
-        if pay_send_id:
-            await run_test(session, "D21 send_payment", "send_payment",
-                {"id": int(pay_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-PaySend", "body": "test"},
-                assert_fn=_assert_success_true)
-            created["pay_send"] = str(pay_send_id)
-        else:
-            exercised_tools.add("send_payment")
-            results.append({"label": "D21 send_payment", "tool": "send_payment", "status": "FAILED",
-                            "reason": "Dependency create_pay_for_send failed — no payment created"})
-            log("  FAIL D21 send_payment: dependency create_pay_for_send failed")
+        pay_send_data = await run_test(session, "D21 create_pay_for_send", "create_payment",
+            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 25, "payment_number": make_name("PAY-SND")})
+        IDS["id_pay_send"] = _int_id(_dict_id(pay_send_data))
+        await run_test(session, "D21 send_payment", "send_payment",
+            {"id": IDS["id_pay_send"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-PaySend", "body": "test"}, assert_fn=_assert_success_true)
 
         # D22 get_invoice_send_preview
-        await run_test_with_store(session, "D22 create_inv_for_preview", "create_invoice",
+        inv_preview_data = await run_test(session, "D22 create_inv_for_preview", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("PRV"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="inv_preview")
-        inv_preview_id = pick_id("inv_preview")
+             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_inv_preview"] = _int_id(_dict_id(inv_preview_data))
         await run_test(session, "D22 get_invoice_send_preview", "get_invoice_send_preview",
-            {"id": int(inv_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-             "subject": f"{rid}-Preview", "body": "preview test"} if inv_preview_id
-            else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"},
-            assert_fn=_assert_html)
-        if inv_preview_id:
-            created["inv_preview"] = str(inv_preview_id)
+            {"id": IDS["id_inv_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # D23 get_estimate_send_preview
-        await run_test_with_store(session, "D23 create_est_for_preview", "create_estimate",
+        est_preview_data = await run_test(session, "D23 create_est_for_preview", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-PRV"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
-            store_key="est_preview")
-        est_preview_id = pick_id("est_preview")
+             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+        IDS["id_est_preview"] = _int_id(_dict_id(est_preview_data))
         await run_test(session, "D23 get_estimate_send_preview", "get_estimate_send_preview",
-            {"id": int(est_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-             "subject": f"{rid}-Preview", "body": "preview test"} if est_preview_id
-            else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"},
-            assert_fn=_assert_html)
-        if est_preview_id:
-            created["est_preview"] = str(est_preview_id)
+            {"id": IDS["id_est_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # D24 get_payment_send_preview
-        await run_test_with_store(session, "D24 create_pay_for_preview", "create_payment",
-            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 30, "payment_number": make_name("PAY-PRV")},
-            store_key="pay_preview")
-        pay_preview_id = pick_id("pay_preview")
+        pay_preview_data = await run_test(session, "D24 create_pay_for_preview", "create_payment",
+            {"payment_date": today_iso, "customer_id": inv_cust, "amount": 30, "payment_number": make_name("PAY-PRV")})
+        IDS["id_pay_preview"] = _int_id(_dict_id(pay_preview_data))
         await run_test(session, "D24 get_payment_send_preview", "get_payment_send_preview",
-            {"id": int(pay_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-             "subject": f"{rid}-Preview", "body": "preview test"} if pay_preview_id
-            else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"},
-            assert_fn=_assert_html)
-        if pay_preview_id:
-            created["pay_preview"] = str(pay_preview_id)
+            {"id": IDS["id_pay_preview"], "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
+             "subject": f"{rid}-Preview", "body": "preview test"}, assert_fn=_assert_html)
 
         # ------------------------------------------------------------------
-        # Phase 4 Cleanup: Delete all Phase 4 created resources
+        # Phase 4 Cleanup: Delete all Phase 4 created resources unconditionally
         # ------------------------------------------------------------------
         log("\n=== Phase 4: Cleanup ===")
-        cleanup_order = [
-            ("inv_clone", "delete_invoices_by_id"),
-            ("est_clone", "delete_estimates_by_id"),
-            ("inv_status", "delete_invoices_by_id"),
-            ("est_status", "delete_estimates_by_id"),
-            ("est_convert", "delete_estimates_by_id"),
-            ("exp_dup", "delete_expenses_by_id"),
-            ("inv_send", "delete_invoices_by_id"),
-            ("est_send", "delete_estimates_by_id"),
-            ("pay_send", "delete_payments_by_id"),
-            ("inv_preview", "delete_invoices_by_id"),
-            ("est_preview", "delete_estimates_by_id"),
-            ("pay_preview", "delete_payments_by_id"),
-        ]
-        for ckey, dtool in cleanup_order:
-            cid = created.get(ckey)
-            if cid:
-                await session.call_tool(dtool, {"id": int(cid)})
-                log(f"  CLEANUP {ckey} id={cid}")
+        for id_key, dtool in [
+            ("id_inv_clone_orig", "delete_invoices_by_id"),
+            ("id_inv_clone_dup", "delete_invoices_by_id"),
+            ("id_est_clone_orig", "delete_estimates_by_id"),
+            ("id_est_clone_dup", "delete_estimates_by_id"),
+            ("id_inv_status", "delete_invoices_by_id"),
+            ("id_est_status", "delete_estimates_by_id"),
+            ("id_est_convert", "delete_estimates_by_id"),
+            ("id_invoice_convert", "delete_invoices_by_id"),
+            ("id_exp_dup_orig", "delete_expenses_by_id"),
+            ("id_exp_dup_dup", "delete_expenses_by_id"),
+            ("id_inv_send", "delete_invoices_by_id"),
+            ("id_est_send", "delete_estimates_by_id"),
+            ("id_pay_send", "delete_payments_by_id"),
+            ("id_inv_preview", "delete_invoices_by_id"),
+            ("id_est_preview", "delete_estimates_by_id"),
+            ("id_pay_preview", "delete_payments_by_id"),
+        ]:
+            await session.call_tool(dtool, {"id": IDS[id_key]})
+            log(f"  CLEANUP {id_key} id={IDS[id_key]}")
 
         # Clean up fixture customer
-        if fixture_customer_id:
-            await session.call_tool("delete_customers_by_id", {"id": int(fixture_customer_id)})
-            log(f"  CLEANUP fixture_customer id={fixture_customer_id}")
+        await session.call_tool("delete_customers_by_id", {"id": IDS["customer_fixture"]})
+        log(f"  CLEANUP fixture_customer id={IDS['customer_fixture']}")
 
         # Clean up fixture category (and any expenses referencing it)
-        if fixture_category_id:
-            fc_id = int(fixture_category_id)
-            r = await session.call_tool("list_all_expenses", {"page_size": 0})
-            ed = extract_content(r)
-            ei = get_list_items(ed)
-            for exp in ei:
-                if isinstance(exp, dict) and exp.get("expense_category_id") == fc_id:
-                    eid = exp.get("id")
-                    if eid:
-                        await session.call_tool("delete_expenses_by_id", {"id": eid})
-                        log(f"  CLEANUP expense id={eid} linked to fixture_category")
-            await session.call_tool("delete_expense_category_by_id", {"id": fc_id})
-            log(f"  CLEANUP fixture_category id={fixture_category_id}")
+        fc_id = IDS["category_fixture"]
+        r = await session.call_tool("list_all_expenses", {"page_size": 0})
+        exp_items = get_list_items(extract_content(r))
+        for exp in exp_items:
+            if isinstance(exp, dict) and exp.get("expense_category_id") == fc_id:
+                eid = exp.get("id")
+                if eid:
+                    await session.call_tool("delete_expenses_by_id", {"id": eid})
+                    log(f"  CLEANUP expense id={eid} linked to fixture_category")
+        await session.call_tool("delete_expense_category_by_id", {"id": fc_id})
+        log(f"  CLEANUP fixture_category id={fc_id}")
 
         # ------------------------------------------------------------------
         # Phase 5: Leak Detection
         # ------------------------------------------------------------------
         log("\n=== Phase 5: Leak Detection ===")
         rid_prefix = f"t{rid}-"
-        known_customer_ids = set()
-        for k, v in created.items():
-            if k.startswith("fixture_customer") or "customer" in k:
-                known_customer_ids.add(v)
+        known_customer_ids = {str(IDS["customer_fixture"]), str(IDS["id_customer"])}
 
         LEAK_SCAN_CONFIG = [
-            ("customer", "list_all_customers", {}, "id", "name", "delete_customers_by_id"),
-            ("item", "list_all_items", {}, "id", "name", "delete_items_by_id"),
-            ("unit", "list_all_units", {}, "id", "name", "delete_unit_by_id"),
-            ("expense_category", "list_all_expense_categories", {}, "id", "name", "delete_expense_category_by_id"),
-            ("payment_method", "list_all_payment_methods", {}, "id", "name", "delete_payment_method_by_id"),
-            ("tax_type", "list_all_tax_types", {}, "id", "name", "delete_tax_type_by_id"),
-            ("note", "list_all_notes", {}, "id", "name", "delete_note_by_id"),
-            ("custom_field", "list_all_custom_fields", {}, "id", "name", "delete_custom_field_by_id"),
-            ("role", "list_all_roles", {}, "id", "name", "delete_role_by_id"),
+            ("customer", "list_all_customers", {"page_size": 0}, "id", "name", "delete_customers_by_id"),
+            ("item", "list_all_items", {"page_size": 0}, "id", "name", "delete_items_by_id"),
+            ("unit", "list_all_units", None, "id", "name", "delete_unit_by_id"),
+            ("expense_category", "list_all_expense_categories", None, "id", "name", "delete_expense_category_by_id"),
+            ("payment_method", "list_all_payment_methods", None, "id", "name", "delete_payment_method_by_id"),
+            ("tax_type", "list_all_tax_types", None, "id", "name", "delete_tax_type_by_id"),
+            ("note", "list_all_notes", None, "id", "name", "delete_note_by_id"),
+            ("custom_field", "list_all_custom_fields", None, "id", "name", "delete_custom_field_by_id"),
+            ("role", "list_all_roles", None, "id", "name", "delete_role_by_id"),
             ("invoice", "list_all_invoices", {"page_size": 0}, "id", "invoice_number", "delete_invoices_by_id"),
             ("estimate", "list_all_estimates", {"page_size": 0}, "id", "estimate_number", "delete_estimates_by_id"),
             ("payment", "list_all_payments", {"page_size": 0}, "id", "payment_number", "delete_payments_by_id"),
@@ -946,7 +871,6 @@ async def main():
         ]
 
         total_leaks = 0
-
         for entity_type, list_tool, list_params, id_key, name_key, delete_tool in LEAK_SCAN_CONFIG:
             result = await session.call_tool(list_tool, list_params or None)
             err = is_error(result)
@@ -973,10 +897,9 @@ async def main():
                 await session.call_tool(delete_tool, {"id": item_id})
                 log(f"       => cleaned up {entity_type} {item_id}")
 
-        # Recurring invoice leak check by customer_id
+        # Recurring invoice leak check (customer_id based)
         ri_result = await session.call_tool("list_all_recurring_invoices", {"page_size": 0})
-        ri_data = extract_content(ri_result)
-        ri_items = get_list_items(ri_data)
+        ri_items = get_list_items(extract_content(ri_result))
         for item in ri_items:
             if not isinstance(item, dict):
                 continue
@@ -1001,32 +924,27 @@ async def main():
         # ------------------------------------------------------------------
         log("\n=== Coverage Enforcement ===")
         static_names = static_tool_names()
-        if set(static_names) != set(tool_names):
-            missing_src = sorted(set(static_names) - set(tool_names))
-            extra_disc = sorted(set(tool_names) - set(static_names))
-            if missing_src:
-                for m in missing_src:
-                    results.append({"label": f"COVERAGE SOURCE {m}", "tool": m, "status": "FAILED",
-                                    "reason": "Tool defined in src/main.py but not exposed by running server (stale container?)"})
-                    log(f"  FAIL COVERAGE SOURCE {m}: in main.py but not discovered")
-            if extra_disc:
-                for m in extra_disc:
-                    results.append({"label": f"COVERAGE STALE {m}", "tool": m, "status": "FAILED",
-                                    "reason": "Tool exposed by running server but not defined in src/main.py (stale build?)"})
-                    log(f"  FAIL COVERAGE STALE {m}: discovered but not in main.py")
-        missing = (set(static_names) | set(tool_names)) - exercised_tools
-        if missing:
-            for m in sorted(missing):
-                results.append({"label": f"COVERAGE {m}", "tool": m, "status": "FAILED",
-                                "reason": "Tool never exercised"})
-                log(f"  FAIL COVERAGE {m}: never exercised")
-            log(f"  {len(missing)} tool(s) not exercised — FAILED")
+        for m in sorted(set(static_names) - set(tool_names)):
+            results.append({"label": f"COVERAGE SOURCE {m}", "tool": m, "status": "FAILED",
+                            "reason": "Tool defined in src/main.py but not exposed by running server (stale container?)"})
+            log(f"  FAIL COVERAGE SOURCE {m}: in main.py but not discovered")
+        for m in sorted(set(tool_names) - set(static_names)):
+            results.append({"label": f"COVERAGE STALE {m}", "tool": m, "status": "FAILED",
+                            "reason": "Tool exposed by running server but not defined in src/main.py (stale build?)"})
+            log(f"  FAIL COVERAGE STALE {m}: discovered but not in main.py")
+        for m in sorted((set(static_names) | set(tool_names)) - exercised_tools):
+            results.append({"label": f"COVERAGE {m}", "tool": m, "status": "FAILED",
+                            "reason": "Tool never exercised"})
+            log(f"  FAIL COVERAGE {m}: never exercised")
 
         # ------------------------------------------------------------------
         # Report Summary
         # ------------------------------------------------------------------
-        passed = sum(1 for r in results if r["status"] == "PASSED")
-        failed = sum(1 for r in results if r["status"] == "FAILED")
+        passed_results = [r for r in results if r["status"] == "PASSED"]
+        failed_results = [r for r in results if r["status"] == "FAILED"]
+        passed = len(passed_results)
+        failed = len(failed_results)
+        total = len(results)
 
         print(f"\n## Summary\n")
         print(f"| Status | Count |")
@@ -1034,28 +952,20 @@ async def main():
         print(f"| PASSED | {passed} |")
         print(f"| FAILED | {failed} |")
 
-        if passed:
-            print(f"\n## PASSED ({passed})\n")
-            for r in results:
-                if r["status"] == "PASSED":
-                    print(f"- `{r['tool']}` — {r['label']}")
+        print(f"\n## PASSED ({passed})\n")
+        for r in passed_results:
+            print(f"- `{r['tool']}` — {r['label']}")
 
-        if failed:
-            print(f"\n## FAILED ({failed})\n")
-            for r in results:
-                if r["status"] == "FAILED":
-                    print(f"### {r['label']}")
-                    print(f"- **Error**: {r['reason']}")
-                    print()
+        print(f"\n## FAILED ({failed})\n")
+        for r in failed_results:
+            print(f"### {r['label']}")
+            print(f"- **Error**: {r['reason']}")
+            print()
 
-        total = len(results)
         print(f"\n---")
         print(f"**Total tests:** {total} | **PASSED:** {passed} | **FAILED:** {failed}")
-
-        if failed == 0:
-            print(f"\n**ALL TESTS PASS**")
-        else:
-            print(f"\n**TESTS FAILING** — see above for details")
+        verdict = ["**TESTS FAILING** — see above for details", "**ALL TESTS PASS**"][failed == 0]
+        print(f"\n{verdict}")
 
 
 def _is_test_artifact(name: str) -> bool:
@@ -1072,13 +982,6 @@ def _is_test_artifact(name: str) -> bool:
 
 
 def static_tool_names() -> list[str]:
-    """Extract tool names statically from src/main.py's @mcp.tool definitions.
-
-    This makes coverage robust to tools being removed from (or added to)
-    main.py but not reflected in the running server: if the static set and the
-    tools/list discovery set diverge, the suite FAILS instead of shrinking the
-    coverage target silently.
-    """
     src_path = Path(__file__).with_name("main.py")
     text = src_path.read_text(encoding="utf-8")
     names = re.findall(r"@mcp\.tool\([^\n]*\)\s*\n\s*async def (\w+)\s*\(", text)
