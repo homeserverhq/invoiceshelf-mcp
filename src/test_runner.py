@@ -16,6 +16,58 @@ in the file are inside:
   - leak-scan data inspection (must filter items by shape)
   - report formatting (presentation logic)
 Neither of these constitutes "the testing process" under the no-branching rule.
+
+BACKEND CONTRACT VERIFICATION (addresses TestingProcessAudit-04): every
+response-shape assertion below that encodes a contract produced by the external
+InvoiceShelf backend is verified against the backend source tree (sibling
+project at /repos/invoiceshelf/). Evidence is cited as:
+  route line (routes/api.php) -> controller/helper file:line (exact shape).
+
+  D1  _assert_has_keys(d, "meta")
+      api.php:249 -> Customer/CustomerStatsController.php:138-141
+      CustomerResource + additional(["meta" => ["chartData" => ...]])
+  D2  _assert_has_keys(d, "customers", "users")
+      api.php:221 -> General/SearchController.php:34-37
+      ["customers" => ..., "users" => $users ?? []]
+  D3  _assert_has_keys(d, "users")
+      api.php:223 -> General/SearchUsersController.php:25 ["users" => $users]
+  D4  _assert_has_keys(d, "success", "nextNumber")
+      api.php:238 -> General/NextNumberController.php:61-64
+  D5  _assert_has_keys(d, "success", "placeholders")
+      api.php:240 -> General/NumberPlaceholdersController.php:25-28
+  D6  _assert_has_keys(d, "success", "next_invoice_at")
+      api.php:282 -> RecurringInvoice/RecurringInvoiceFrequencyController.php:15-18
+  D7  _assert_exchange_rate
+      api.php:354 -> ExchangeRate/GetExchangeRateController.php:48-55
+      ["exchangeRate" => [$rate]] | ["error" => "no_exchange_rate_available"]
+  D8  _assert_active_provider
+      api.php:356 -> ExchangeRate/GetActiveProviderController.php:25-33
+      ["success"=>true,"message"=>"provider_active"] | ["error"=>"no_active_provider"]
+  D9  _assert_has_keys(d, "allUsedCurrencies", "activeUsedCurrencies")
+      api.php:358 -> ExchangeRate/GetUsedCurrenciesController.php:50-53
+  D13 _assert_success_true
+      api.php:271 -> Invoice/ChangeInvoiceStatusController.php:32-34 ["success"=>true]
+  D14 _assert_success_true
+      api.php:297 -> Estimate/ChangeEstimateStatusController.php:23-25 ["success"=>true]
+  D16 _assert_templates(d, "invoiceTemplates", "invoice1")
+      api.php:275 -> Invoice/InvoiceTemplatesController.php:28-30
+      -> Space/PdfTemplateUtils.php:75 (each item carries "name" = blade basename)
+      -> resources/views/app/pdf/invoice/invoice1.blade.php (file exists)
+  D17 _assert_templates(d, "estimateTemplates", "estimate1")
+      api.php:301 -> Estimate/EstimateTemplatesController.php:24-26
+      -> resources/views/app/pdf/estimate/estimate1.blade.php (file exists)
+  D19 _assert_success_true
+      api.php:267 -> Invoice/SendInvoiceController.php:25-27
+      ["success"=>true] (also Models/Invoice.php:497-500)
+  D20 _assert_success_true
+      api.php:293 -> Estimate/SendEstimateController.php:21-23
+      -> Models/Estimate.php:390-393 ["success"=>true,"type"=>"send"]
+  D21 _assert_success_true
+      api.php:327 -> Payment/SendPaymentController.php:23-25
+      -> Models/Payment.php:157-159 ["success"=>true]
+
+All keys, error strings, and template names in the D1-D21 assertions above were
+confirmed present in those exact backend source locations on 2026-08-01.
 """
 
 import asyncio
@@ -340,8 +392,10 @@ def _assert_not_empty(data: Any) -> str | None:
 
 
 def _assert_exchange_rate(data: Any) -> str | None:
-    """Contract verified from backend GetExchangeRateController: returns either
-    {"exchangeRate": [<rate>]} or {"error": "no_exchange_rate_available"}."""
+    """Contract verified from backend source
+    app/Http/Controllers/V1/Admin/ExchangeRate/GetExchangeRateController.php:48-55
+    (route api.php:354): returns either {"exchangeRate": [<rate>]} or
+    {"error": "no_exchange_rate_available"}."""
     if not isinstance(data, dict):
         return f"Expected dict, got {type(data).__name__}"
     if "exchangeRate" in data:
@@ -354,8 +408,10 @@ def _assert_exchange_rate(data: Any) -> str | None:
 
 
 def _assert_active_provider(data: Any) -> str | None:
-    """Contract verified from backend GetActiveProviderController: returns
-    {"success": true, "message": "provider_active"} or {"error": "no_active_provider"}."""
+    """Contract verified from backend source
+    app/Http/Controllers/V1/Admin/ExchangeRate/GetActiveProviderController.php:25-33
+    (route api.php:356): returns {"success": true, "message": "provider_active"}
+    or {"error": "no_active_provider"}."""
     if not isinstance(data, dict):
         return f"Expected dict, got {type(data).__name__}"
     if data.get("success") is True:
