@@ -160,7 +160,13 @@ class InvoiceShelfClient:
     async def get_customer_stats(self, customer_id: int, api_key: Optional[str] = None, previous_year: bool = False) -> Any:
         params = {"previous_year": "true" if previous_year else "false"}
         data = await self.get(f"{PREFIX}/customers/{customer_id}/stats", api_key, params=params)
-        return self._unwrap(data)
+        unwrapped = self._unwrap(data)
+        # The backend returns the stats in the top-level "meta" (chartData)
+        # alongside the customer resource "data". Preserve meta so the tool
+        # actually returns the statistics, not just the customer profile.
+        if isinstance(data, dict) and isinstance(unwrapped, dict) and "meta" in data:
+            return {**unwrapped, "meta": data["meta"]}
+        return unwrapped
 
     # =========================================================================
     # Items

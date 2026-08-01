@@ -3,15 +3,19 @@ End-to-end test harness for InvoiceShelf MCP Server.
 
 Exercises all 106 MCP tools with real assertions on create/get/update/delete
 cycles, response shapes, and domain-specific operations. Every tool is executed
-at least once; coverage is enforced. All failures are reported honestly — no
-silent drops, no fail-to-pass laundering.
+at least once; coverage is enforced against BOTH the statically parsed tool
+definitions in src/main.py and the tools/list discovery set (so removing or
+adding a tool cannot silently shrink the coverage target). All failures are
+reported honestly — no silent drops, no fail-to-pass laundering.
 """
 
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 import httpx
@@ -184,25 +188,39 @@ def get_list_items(data: Any) -> list[dict[str, Any]]:
 # Assertion helpers
 # =============================================================================
 
+def _values_match(exp: Any, act: Any) -> bool:
+    """Compare two values, treating numeric values (int/float/numeric strings)
+    as equal regardless of type formatting (e.g. 100 == 100.0 == "100.00")."""
+    try:
+        return float(exp) == float(act)
+    except (TypeError, ValueError):
+        return str(exp) == str(act)
+
+
 def _assert_created(data: Any, create_params: dict, label_field: str = "name") -> str | None:
     if not isinstance(data, dict):
         return f"Expected dict response, got {type(data).__name__}"
     if "id" not in data:
         return "Response missing 'id' field"
     if label_field in data and label_field in create_params:
-        exp = str(create_params[label_field])
-        act = str(data[label_field])
-        if act != exp:
+        exp = create_params[label_field]
+        act = data[label_field]
+        if not _values_match(exp, act):
             return f"Field '{label_field}' mismatch: expected '{exp}', got '{act}'"
     return None
 
 
-def _assert_get(data: Any, expected_id: Any) -> str | None:
+def _assert_get(data: Any, expected_id: Any, create_params: dict | None = None,
+                label_field: str = "name") -> str | None:
     if not isinstance(data, dict):
         return f"Expected dict response, got {type(data).__name__}"
     actual = data.get("id")
     if actual is not None and expected_id is not None and str(actual) != str(expected_id):
         return f"id mismatch: expected {expected_id}, got {actual}"
+    if create_params and label_field in data and label_field in create_params:
+        if not _values_match(create_params[label_field], data[label_field]):
+            return (f"Field '{label_field}' not round-tripped on read-back: "
+                    f"expected '{create_params[label_field]}', got '{data[label_field]}'")
     return None
 
 
@@ -210,10 +228,65 @@ def _assert_updated(data: Any, update_params: dict, label_field: str = "name") -
     if not isinstance(data, dict):
         return f"Expected dict response, got {type(data).__name__}"
     if label_field in data and label_field in update_params:
-        exp = str(update_params[label_field])
-        act = str(data[label_field])
-        if act != exp:
+        exp = update_params[label_field]
+        act = data[label_field]
+        if not _values_match(exp, act):
             return f"Field '{label_field}' not updated: expected '{exp}', got '{act}'"
+    return None
+
+
+def _assert_any_key(data: Any, *keys: str) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    for k in keys:
+        if k in data:
+            return None
+    return f"Expected one of keys {keys} in response, got keys {list(data.keys())}"
+
+
+def _assert_success_true(data: Any) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    if data.get("success") is not True:
+        return f"Expected 'success': true, got {data!r}"
+    return None
+
+
+def _assert_deleted(data: Any) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    if data.get("deleted") is not True:
+        return f"Expected 'deleted': true, got {data!r}"
+    return None
+
+
+def _assert_cloned(data: Any, original_id: Any) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    if "id" not in data:
+        return "Response missing 'id' field"
+    if original_id is not None and str(data.get("id")) == str(original_id):
+        return f"Result reused original id ({data.get('id')}) instead of creating a new record"
+    return None
+
+
+def _assert_templates(data: Any, key: str, expected_name: str) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    val = data.get(key)
+    if not isinstance(val, list) or not val:
+        return f"Expected non-empty list for '{key}', got {val!r}"
+    names = [t.get("name") for t in val if isinstance(t, dict)]
+    if expected_name not in names:
+        return f"Expected template '{expected_name}' not found in {names}"
+    return None
+
+
+def _assert_html(data: Any) -> str | None:
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    if "html" not in data or not isinstance(data.get("html"), str):
+        return f"Expected 'html' string, got {data!r}"
     return None
 
 
@@ -300,7 +373,12 @@ async def run_verify_delete(session: MCPSession, label: str, get_tool: str, para
     result = await session.call_tool(get_tool, params)
     err = is_error(result)
     if err:
-        if "not found" in err.lower():
+        # A deleted record is confirmed when the read-back fails with a
+        # not-found signal: the HTTP 404 status (from the client's
+        # HTTPStatusError message) or Laravel's "No query results" body.
+        # Any other error (e.g. 500) is treated as a real failure, not a
+        # delete confirmation.
+        if any(marker in err.lower() for marker in ("404", "no query results", "not found")):
             results.append({"label": label, "tool": get_tool, "status": "PASSED", "data": {"verified": "deleted"}})
             log(f"  PASS {label} (confirmed deleted)")
             return True
@@ -315,20 +393,24 @@ async def run_verify_delete(session: MCPSession, label: str, get_tool: str, para
 async def _run_crud_for(session, label, create_tool, create_params, get_tool, update_tool, update_params,
                         delete_tool, store_prefix=None, label_field="name"):
     key = label.lower() if label else store_prefix
+    # Dependency-failure contract: if the create step fails, the dependent
+    # tests below still RUN (against id=0) and FAIL honestly with the backend's
+    # error — no silent skips. This is intentional.
     ok = await run_test_with_store(session, f"C1 create_{key}", create_tool, create_params, store_key=f"create_{key}",
         assert_fn=lambda d, _cp=create_params.copy(), _lf=label_field: _assert_created(d, _cp, _lf))
     cid = pick_id(f"create_{key}") if ok else None
     if cid:
         created[f"create_{key}"] = str(cid)
     await run_test_with_store(session, f"C2 get_{key}_by_id", get_tool, {"id": cid} if cid else {"id": 0}, store_key=f"get_{key}",
-        assert_fn=(lambda d, _cid=cid: _assert_get(d, _cid)) if cid else None)
+        assert_fn=(lambda d, _cid=cid, _cp=create_params.copy(), _lf=label_field: _assert_get(d, _cid, _cp, _lf)) if cid else None)
     gid = pick_id(f"get_{key}") or cid
     upd = dict(update_params)
     upd["id"] = gid if gid else 0
     await run_test(session, f"C3 update_{key}", update_tool, upd)
     await run_test(session, f"C3a verify_update_{key}", get_tool, {"id": gid} if gid else {"id": 0},
         assert_fn=(lambda d, _up=update_params.copy(), _lf=label_field: _assert_updated(d, _up, _lf)) if gid else None)
-    await run_test(session, f"C4 delete_{key}_by_id", delete_tool, {"id": gid} if gid else {"id": 0})
+    await run_test(session, f"C4 delete_{key}_by_id", delete_tool, {"id": gid} if gid else {"id": 0},
+        assert_fn=_assert_deleted)
     await run_verify_delete(session, f"C5 verify_delete_{key}", get_tool, {"id": gid} if gid else {"id": 0})
 
 
@@ -425,8 +507,9 @@ async def main():
             if isinstance(ccy_data, dict):
                 COMPANY_CURRENCY_ID = ccy_data.get("id")
         if COMPANY_CURRENCY_ID is None:
-            COMPANY_CURRENCY_ID = 3
-            log(f"  WARN: could not derive company currency from bootstrap, falling back to {COMPANY_CURRENCY_ID}")
+            # No magic fallback ID: leave it unset so tests that need the
+            # company currency fail honestly with a clear backend error.
+            log("  WARN: could not derive company currency from bootstrap; dependent tests will fail honestly")
 
         # ------------------------------------------------------------------
         # Phase 3: Resource CRUD Cycle
@@ -520,8 +603,8 @@ async def main():
             "delete_payments_by_id", "payment", label_field="payment_number")
 
         # Expense CRUD
-        exp_cat_id = int((fixture_category_id or pick_id("fixture_category")) or 0) or 1
-        ccy_id = COMPANY_CURRENCY_ID or 1
+        exp_cat_id = int((fixture_category_id or pick_id("fixture_category")) or 0)
+        ccy_id = COMPANY_CURRENCY_ID or 0
         await _run_crud_for(session, "expense", "create_expense",
             {"expense_date": today_iso, "expense_category_id": exp_cat_id, "amount": 100, "currency_id": ccy_id,
              "expense_number": make_name("EXP"), "exchange_rate": "1"},
@@ -550,61 +633,64 @@ async def main():
 
         # D1 get_customer_stats (call regardless of fixture)
         await run_test(session, "D1 get_customer_stats", "get_customer_stats",
-            {"id": int(fixture_customer_id)} if fixture_customer_id else {"id": 0})
+            {"id": int(fixture_customer_id)} if fixture_customer_id else {"id": 0},
+            assert_fn=lambda d: _assert_has_keys(d, "meta"))
 
         # D2 search_customers_and_users
         await run_test(session, "D2 search_customers_and_users", "search_customers_and_users",
-            {"search": f"t{rid}"}, assert_fn=_assert_not_empty)
+            {"search": f"t{rid}"}, assert_fn=lambda d: _assert_has_keys(d, "customers", "users"))
 
         # D3 search_users
         await run_test(session, "D3 search_users", "search_users",
-            assert_fn=_assert_not_empty)
+            assert_fn=lambda d: _assert_has_keys(d, "users"))
 
         # D4 get_next_number
         await run_test(session, "D4 get_next_number", "get_next_number", {"key": "invoice"},
-            assert_fn=lambda d: _assert_has_keys(d, "nextNumber") or _assert_has_keys(d, "success"))
+            assert_fn=lambda d: _assert_has_keys(d, "success", "nextNumber"))
 
         # D5 get_number_placeholders
         await run_test(session, "D5 get_number_placeholders", "get_number_placeholders",
             {"format": "INV-{NUMBER}"},
-            assert_fn=lambda d: _assert_has_keys(d, "placeholders") or _assert_has_keys(d, "success"))
+            assert_fn=lambda d: _assert_has_keys(d, "success", "placeholders"))
 
         # D6 get_recurring_invoice_frequency
         await run_test(session, "D6 get_recurring_invoice_frequency", "get_recurring_invoice_frequency",
             {"frequency": "0 0 1 * *", "starts_at": today_iso},
-            assert_fn=lambda d: _assert_has_keys(d, "next_invoice_at") or _assert_has_keys(d, "success"))
+            assert_fn=lambda d: _assert_has_keys(d, "success", "next_invoice_at"))
 
         # D7 get_exchange_rate
         await run_test(session, "D7 get_exchange_rate", "get_exchange_rate",
-            {"currency_id": ccy_id})
+            {"currency_id": ccy_id} if ccy_id else {"currency_id": 0},
+            assert_fn=lambda d: _assert_any_key(d, "exchangeRate", "error"))
 
         # D8 get_active_exchange_rate_provider
         await run_test(session, "D8 get_active_exchange_rate_provider", "get_active_exchange_rate_provider",
-            {"currency_id": ccy_id})
+            {"currency_id": ccy_id} if ccy_id else {"currency_id": 0},
+            assert_fn=lambda d: _assert_any_key(d, "success", "error"))
 
         # D9 list_used_currencies_for_exchange
         await run_test(session, "D9 list_used_currencies_for_exchange", "list_used_currencies_for_exchange",
-            assert_fn=_assert_not_empty)
+            assert_fn=lambda d: _assert_has_keys(d, "allUsedCurrencies", "activeUsedCurrencies"))
 
-        # D10 list_supported_currencies — no valid provider key; test asserts the
-        #     tool correctly forwards params and surfaces the backend's specific
-        #     "invalid_key" error for bad credentials (honest error-path test).
+        # D10 list_supported_currencies — negative/error-path test only.
+        # The success path (returning the provider's currency list) requires a
+        # valid external provider API key, which is not available in this
+        # environment (every supported driver calls an external paid API, see
+        # ExchangeRateProvidersTrait). We therefore test that the tool forwards
+        # driver/key params and surfaces the backend's specific "invalid_key"
+        # error contract. Any other outcome is an explicit FAILED.
         result = await session.call_tool("list_supported_currencies", {"driver": "currency_freak", "key": "invalid-test-key"})
         err = is_error(result)
+        exercised_tools.add("list_supported_currencies")
         if err and "invalid_key" in err.lower():
-            exercised_tools.add("list_supported_currencies")
-            results.append({"label": "D10 list_supported_currencies", "tool": "list_supported_currencies", "status": "PASSED",
-                            "data": {"note": "expected invalid_key error for bad credentials"}})
-            log("  PASS D10 list_supported_currencies (expected invalid_key error)")
-        elif err:
-            exercised_tools.add("list_supported_currencies")
-            results.append({"label": "D10 list_supported_currencies", "tool": "list_supported_currencies", "status": "FAILED", "reason": err})
-            log(f"  FAIL D10 list_supported_currencies: {err}")
+            results.append({"label": "D10 list_supported_currencies (error-path)", "tool": "list_supported_currencies",
+                            "status": "PASSED", "data": {"note": "expected invalid_key error for bad credentials"}})
+            log("  PASS D10 list_supported_currencies (error-path: invalid_key returned)")
         else:
-            exercised_tools.add("list_supported_currencies")
-            results.append({"label": "D10 list_supported_currencies", "tool": "list_supported_currencies", "status": "PASSED",
-                            "data": {"note": "unexpected success (provider may now be configured)"}})
-            log("  PASS D10 list_supported_currencies (unexpected success)")
+            reason = err or "unexpected success (no error) with invalid provider credentials"
+            results.append({"label": "D10 list_supported_currencies (error-path)", "tool": "list_supported_currencies",
+                            "status": "FAILED", "reason": reason})
+            log(f"  FAIL D10 list_supported_currencies: {reason}")
 
         # Create resources for clone/status/send/preview/convert/duplicate tests
         inv_cust = int(fixture_customer_id or 0)
@@ -616,7 +702,8 @@ async def main():
             store_key="inv_clone")
         inv_clone_id = pick_id("inv_clone")
         await run_test(session, "D11 clone_invoice", "clone_invoice",
-            {"id": int(inv_clone_id)} if inv_clone_id else {"id": 0})
+            {"id": int(inv_clone_id)} if inv_clone_id else {"id": 0},
+            assert_fn=(lambda d, _o=inv_clone_id: _assert_cloned(d, _o)) if inv_clone_id else None)
         if inv_clone_id:
             created["inv_clone"] = str(inv_clone_id)
 
@@ -627,7 +714,8 @@ async def main():
             store_key="est_clone")
         est_clone_id = pick_id("est_clone")
         await run_test(session, "D12 clone_estimate", "clone_estimate",
-            {"id": int(est_clone_id)} if est_clone_id else {"id": 0})
+            {"id": int(est_clone_id)} if est_clone_id else {"id": 0},
+            assert_fn=(lambda d, _o=est_clone_id: _assert_cloned(d, _o)) if est_clone_id else None)
         if est_clone_id:
             created["est_clone"] = str(est_clone_id)
 
@@ -638,7 +726,8 @@ async def main():
             store_key="inv_status")
         inv_status_id = pick_id("inv_status")
         await run_test(session, "D13 change_invoice_status", "change_invoice_status",
-            {"id": int(inv_status_id), "status": "SENT"} if inv_status_id else {"id": 0, "status": "SENT"})
+            {"id": int(inv_status_id), "status": "SENT"} if inv_status_id else {"id": 0, "status": "SENT"},
+            assert_fn=_assert_success_true)
         if inv_status_id:
             created["inv_status"] = str(inv_status_id)
 
@@ -649,7 +738,8 @@ async def main():
             store_key="est_status")
         est_status_id = pick_id("est_status")
         await run_test(session, "D14 change_estimate_status", "change_estimate_status",
-            {"id": int(est_status_id), "status": "SENT"} if est_status_id else {"id": 0, "status": "SENT"})
+            {"id": int(est_status_id), "status": "SENT"} if est_status_id else {"id": 0, "status": "SENT"},
+            assert_fn=_assert_success_true)
         if est_status_id:
             created["est_status"] = str(est_status_id)
 
@@ -660,17 +750,18 @@ async def main():
             store_key="est_convert")
         est_convert_id = pick_id("est_convert")
         await run_test(session, "D15 convert_estimate_to_invoice", "convert_estimate_to_invoice",
-            {"id": int(est_convert_id)} if est_convert_id else {"id": 0})
+            {"id": int(est_convert_id)} if est_convert_id else {"id": 0},
+            assert_fn=lambda d: _assert_has_keys(d, "id"))
         if est_convert_id:
             created["est_convert"] = str(est_convert_id)
 
         # D16 list_invoice_templates
         await run_test(session, "D16 list_invoice_templates", "list_invoice_templates",
-            assert_fn=lambda d: _assert_has_keys(d, "invoiceTemplates"))
+            assert_fn=lambda d: _assert_templates(d, "invoiceTemplates", "invoice1"))
 
         # D17 list_estimate_templates
         await run_test(session, "D17 list_estimate_templates", "list_estimate_templates",
-            assert_fn=lambda d: _assert_has_keys(d, "estimateTemplates"))
+            assert_fn=lambda d: _assert_templates(d, "estimateTemplates", "estimate1"))
 
         # D18 duplicate_expense
         await run_test_with_store(session, "D18 create_exp_for_dup", "create_expense",
@@ -679,11 +770,15 @@ async def main():
             store_key="exp_dup")
         exp_dup_id = pick_id("exp_dup")
         await run_test(session, "D18 duplicate_expense", "duplicate_expense",
-            {"id": int(exp_dup_id), "expense_date": today_iso} if exp_dup_id else {"id": 0, "expense_date": today_iso})
+            {"id": int(exp_dup_id), "expense_date": today_iso} if exp_dup_id else {"id": 0, "expense_date": today_iso},
+            assert_fn=(lambda d, _o=exp_dup_id: _assert_cloned(d, _o)) if exp_dup_id else None)
         if exp_dup_id:
             created["exp_dup"] = str(exp_dup_id)
 
-        # D19 send_invoice — uses valid RFC-compliant from_ so send actually works
+        # D19 send_invoice — uses valid RFC-compliant from_ so send actually works.
+        # The success contract is asserted ({"success": true}); no pass-on-error.
+        # If the backend ever lacks a working mail transport these fail by design
+        # (honest failure) rather than being silently marked green.
         await run_test_with_store(session, "D19 create_inv_for_send", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("SND"), "invoice_date": today_iso,
              "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}},
@@ -692,7 +787,8 @@ async def main():
         if inv_send_id:
             await run_test(session, "D19 send_invoice", "send_invoice",
                 {"id": int(inv_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-InvSend", "body": "test"})
+                 "subject": f"{rid}-InvSend", "body": "test"},
+                assert_fn=_assert_success_true)
             created["inv_send"] = str(inv_send_id)
         else:
             exercised_tools.add("send_invoice")
@@ -709,7 +805,8 @@ async def main():
         if est_send_id:
             await run_test(session, "D20 send_estimate", "send_estimate",
                 {"id": int(est_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-EstSend", "body": "test"})
+                 "subject": f"{rid}-EstSend", "body": "test"},
+                assert_fn=_assert_success_true)
             created["est_send"] = str(est_send_id)
         else:
             exercised_tools.add("send_estimate")
@@ -725,7 +822,8 @@ async def main():
         if pay_send_id:
             await run_test(session, "D21 send_payment", "send_payment",
                 {"id": int(pay_send_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                 "subject": f"{rid}-PaySend", "body": "test"})
+                 "subject": f"{rid}-PaySend", "body": "test"},
+                assert_fn=_assert_success_true)
             created["pay_send"] = str(pay_send_id)
         else:
             exercised_tools.add("send_payment")
@@ -743,7 +841,8 @@ async def main():
             {"id": int(inv_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
              "subject": f"{rid}-Preview", "body": "preview test"} if inv_preview_id
             else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"})
+                  "subject": f"{rid}-Preview", "body": "preview test"},
+            assert_fn=_assert_html)
         if inv_preview_id:
             created["inv_preview"] = str(inv_preview_id)
 
@@ -757,7 +856,8 @@ async def main():
             {"id": int(est_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
              "subject": f"{rid}-Preview", "body": "preview test"} if est_preview_id
             else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"})
+                  "subject": f"{rid}-Preview", "body": "preview test"},
+            assert_fn=_assert_html)
         if est_preview_id:
             created["est_preview"] = str(est_preview_id)
 
@@ -770,7 +870,8 @@ async def main():
             {"id": int(pay_preview_id), "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
              "subject": f"{rid}-Preview", "body": "preview test"} if pay_preview_id
             else {"id": 0, "to": "solo@selfhostingbox.com", "from_": "no-reply@selfhostingbox.com",
-                  "subject": f"{rid}-Preview", "body": "preview test"})
+                  "subject": f"{rid}-Preview", "body": "preview test"},
+            assert_fn=_assert_html)
         if pay_preview_id:
             created["pay_preview"] = str(pay_preview_id)
 
@@ -896,10 +997,24 @@ async def main():
             log("  PASS LEAK: no test artifacts found")
 
         # ------------------------------------------------------------------
-        # Coverage Enforcement
+        # Coverage Enforcement (static cross-check + exercised-tool coverage)
         # ------------------------------------------------------------------
         log("\n=== Coverage Enforcement ===")
-        missing = set(tool_names) - exercised_tools
+        static_names = static_tool_names()
+        if set(static_names) != set(tool_names):
+            missing_src = sorted(set(static_names) - set(tool_names))
+            extra_disc = sorted(set(tool_names) - set(static_names))
+            if missing_src:
+                for m in missing_src:
+                    results.append({"label": f"COVERAGE SOURCE {m}", "tool": m, "status": "FAILED",
+                                    "reason": "Tool defined in src/main.py but not exposed by running server (stale container?)"})
+                    log(f"  FAIL COVERAGE SOURCE {m}: in main.py but not discovered")
+            if extra_disc:
+                for m in extra_disc:
+                    results.append({"label": f"COVERAGE STALE {m}", "tool": m, "status": "FAILED",
+                                    "reason": "Tool exposed by running server but not defined in src/main.py (stale build?)"})
+                    log(f"  FAIL COVERAGE STALE {m}: discovered but not in main.py")
+        missing = (set(static_names) | set(tool_names)) - exercised_tools
         if missing:
             for m in sorted(missing):
                 results.append({"label": f"COVERAGE {m}", "tool": m, "status": "FAILED",
@@ -954,6 +1069,20 @@ def _is_test_artifact(name: str) -> bool:
         return False
     prefix = name[1:dash_pos]
     return bool(prefix) and all(c in "0123456789abcdef" for c in prefix)
+
+
+def static_tool_names() -> list[str]:
+    """Extract tool names statically from src/main.py's @mcp.tool definitions.
+
+    This makes coverage robust to tools being removed from (or added to)
+    main.py but not reflected in the running server: if the static set and the
+    tools/list discovery set diverge, the suite FAILS instead of shrinking the
+    coverage target silently.
+    """
+    src_path = Path(__file__).with_name("main.py")
+    text = src_path.read_text(encoding="utf-8")
+    names = re.findall(r"@mcp\.tool\([^\n]*\)\s*\n\s*async def (\w+)\s*\(", text)
+    return sorted(names)
 
 
 if __name__ == "__main__":
