@@ -41,6 +41,15 @@ def _filter_fields(data: Any, common_set: set[str]) -> Any:
     return data
 
 
+def _strip_roles(data: Any) -> Any:
+    """Recursively remove the token-heavy 'roles' key from any dict."""
+    if isinstance(data, dict):
+        return {k: _strip_roles(v) for k, v in data.items() if k != "roles"}
+    if isinstance(data, list):
+        return [_strip_roles(item) for item in data]
+    return data
+
+
 def _normalize_datetime(value: str) -> str:
     if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', value):
         parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -85,7 +94,7 @@ class InvoiceShelfClient:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
-    async def request(self, method: str, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
+    async def request(self, method: str, path: str, api_key: Optional[str] = None, keep_roles: bool = False, **kwargs: Any) -> Any:
         url = f"{self.base_url}{path}"
         headers = self._get_headers(api_key)
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -99,7 +108,8 @@ class InvoiceShelfClient:
             if response.status_code == 204:
                 return {}
             if response.headers.get("content-type", "").startswith("application/json"):
-                return response.json()
+                data = response.json()
+                return data if keep_roles else _strip_roles(data)
             return {"text": response.text}
 
     async def get(self, path: str, api_key: Optional[str] = None, **kwargs: Any) -> Any:
@@ -170,6 +180,11 @@ class InvoiceShelfClient:
         if isinstance(data, dict) and isinstance(unwrapped, dict) and "meta" in data:
             return {**unwrapped, "meta": data["meta"]}
         return unwrapped
+
+    async def get_customer_roles_by_id(self, customer_id: int, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/customers/{customer_id}", api_key, keep_roles=True)
+        unwrapped = self._unwrap(data)
+        return {"roles": unwrapped.get("roles", []) if isinstance(unwrapped, dict) else []}
 
     # =========================================================================
     # Items
@@ -661,6 +676,22 @@ class InvoiceShelfClient:
     async def get_current_company(self, api_key: Optional[str] = None) -> Any:
         data = await self.get(f"{PREFIX}/current-company", api_key)
         return self._unwrap(data)
+
+    async def get_company_roles_by_id(self, company_id: int, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/companies", api_key, keep_roles=True)
+        companies = self._unwrap(data)
+        for company in companies if isinstance(companies, list) else []:
+            if isinstance(company, dict) and str(company.get("id")) == str(company_id):
+                return {"id": company_id, "roles": company.get("roles", [])}
+        return {"id": company_id, "roles": [], "error": "company not found"}
+
+    async def get_current_user_roles(self, api_key: Optional[str] = None) -> Any:
+        data = await self.get(f"{PREFIX}/bootstrap", api_key, keep_roles=True)
+        unwrapped = self._unwrap(data)
+        current_user = unwrapped.get("current_user", {}) if isinstance(unwrapped, dict) else {}
+        if not isinstance(current_user, dict):
+            current_user = {}
+        return {"roles": current_user.get("roles", [])}
 
     async def list_all_companies(self, api_key: Optional[str] = None, include_all_fields: bool = False) -> Any:
         data = await self.get(f"{PREFIX}/companies", api_key)

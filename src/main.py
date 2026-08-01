@@ -328,6 +328,20 @@ async def get_current_company(ctx: Context = None) -> dict[str, Any]:
     return await get_client().get_current_company(get_user_token())
 
 @mcp.tool(tags={"read", "primary", "invoiceshelf"})
+async def get_company_roles_by_id(company_id: int, ctx: Context = None) -> dict[str, Any]:
+    """Get the roles for a company.
+
+    Args:
+        company_id: The unique ID of the company.
+    """
+    return await get_client().get_company_roles_by_id(company_id, get_user_token())
+
+@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+async def get_current_user_roles(ctx: Context = None) -> dict[str, Any]:
+    """Get the roles assigned to the current user."""
+    return await get_client().get_current_user_roles(get_user_token())
+
+@mcp.tool(tags={"read", "primary", "invoiceshelf"})
 async def list_all_companies(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all companies the current user belongs to.
 
@@ -421,6 +435,15 @@ async def get_customer_by_id(id: int, include_all_fields: bool = False, ctx: Con
         include_all_fields: Default False (common fields only). Set True for all fields.
     """
     return await get_client().get_customer_by_id(id, get_user_token(), include_all_fields=include_all_fields)
+
+@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+async def get_customer_roles_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
+    """Get the roles assigned to a customer.
+
+    Args:
+        id: The unique ID of the customer.
+    """
+    return await get_client().get_customer_roles_by_id(id, get_user_token())
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
 async def create_customer(name: str, email: str, password: str = "", phone: str = "", company_name: str = "", contact_name: str = "", website: str = "", prefix: str = "", tax_id: str = "", enable_portal: bool = False, currency_id: str = "", billing: CustomerAddress = None, shipping: CustomerAddress = None, ctx: Context = None) -> dict[str, Any]:

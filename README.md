@@ -2,7 +2,7 @@
 
 This repository contains a Model Context Protocol (MCP) server that acts
 as a secure, multi-tenant proxy between an AI Assistant and the
-InvoiceShelf backend API. It exposes **106 MCP tools** covering
+InvoiceShelf backend API. It exposes **109 MCP tools** covering
 14 resource domains with full CRUD, search, dashboard,
 and relationship management.
 
@@ -14,14 +14,14 @@ and relationship management.
 - **👥 Multi-Tenancy** — Uses Python `contextvars` to maintain thread-safe
   user identity isolation, ensuring all AI-driven actions are scoped to
   the authenticated user's permissions.
-- **📊 Full InvoiceShelf Coverage** — 106 tools mapped to InvoiceShelf
+- **📊 Full InvoiceShelf Coverage** — 109 tools mapped to InvoiceShelf
   API endpoints across 14 resource domains.
 - **⚡ TOON Optimization** — All list responses are automatically compressed
   using TOON (Token-Optimized Object Notation) to reduce token consumption
   and maximize context window efficiency.
 - **⚡ Efficient Gets** — GET responses return only commonly used fields by
   default. Full objects are available via an `include_all_fields` flag.
-- **🧪 Comprehensive Testing** — 173 automated tests covering all tool
+- **🧪 Comprehensive Testing** — 180 automated tests covering all tool
   domains, run via the test runner pipeline.
 
 ## 🔧 Environment Variables
@@ -78,7 +78,7 @@ The MCP server serves at `http://invoiceshelf-mcp:80/mcp`
 
 ## 🛠️ API Tool Mapping
 
-The server implements 106 MCP tools organized into the following
+The server implements 109 MCP tools organized into the following
 categories:
 
 ### 🧾 Invoices (10 tools)
@@ -106,9 +106,10 @@ categories:
 - `list_estimate_templates` — List available estimate templates
 - `get_estimate_send_preview` — Get an estimate send preview
 
-### 👥 Customers (6 tools)
+### 👥 Customers (7 tools)
 - `list_all_customers` — List all customer records
 - `get_customer_by_id` — Get a single customer by ID
+- `get_customer_roles_by_id` — Get the roles assigned to a customer
 - `create_customer` — Create a new customer
 - `update_customer` — Update an existing customer
 - `delete_customers_by_id` — Delete a customer by ID
@@ -194,7 +195,7 @@ categories:
 - `update_role` — Update an existing role
 - `delete_role_by_id` — Delete a role by ID
 
-### 🌐 Domain (21 tools)
+### 🌐 Domain (23 tools)
 - `check_server_status` — Check connectivity to the InvoiceShelf backend
 - `get_dashboard` — Get dashboard data
 - `get_bootstrap` — Get application bootstrap data
@@ -209,6 +210,8 @@ categories:
 - `get_next_number` — Get the next number for a resource
 - `get_number_placeholders` — Get number placeholders for a format
 - `get_current_company` — Get the current company
+- `get_company_roles_by_id` — Get the roles for a company
+- `get_current_user_roles` — Get the roles assigned to the current user
 - `list_all_companies` — List all companies
 - `list_abilities` — List all available abilities
 - `get_recurring_invoice_frequency` — Get the next occurrence for a recurring frequency

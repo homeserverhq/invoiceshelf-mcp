@@ -367,6 +367,23 @@ def _assert_common_only(data: Any) -> str | None:
     return None
 
 
+def _assert_roles_list(data: Any) -> str | None:
+    """Verify the response exposes a 'roles' list (dedicated roles tools)."""
+    if not isinstance(data, dict):
+        return f"Expected dict response, got {type(data).__name__}"
+    roles = data.get("roles")
+    if not isinstance(roles, list):
+        return f"Expected 'roles' list, got {roles!r}"
+    return None
+
+
+def _assert_has_no_roles(data: Any) -> str | None:
+    """Verify the response does NOT expose the token-heavy 'roles' key."""
+    if isinstance(data, dict) and "roles" in data:
+        return f"roles key must be stripped from responses, present in {data!r}"
+    return None
+
+
 def static_conformance_guard() -> list[dict[str, str]]:
     """Scan src/main.py and verify every tool follows include_all_fields transmission rules."""
     src_path = Path(__file__).with_name("main.py")
@@ -379,6 +396,8 @@ def static_conformance_guard() -> list[dict[str, str]]:
             text, re.DOTALL
         )
         if not m:
+            continue
+        if name.startswith("get_") and "_roles" in name:
             continue
         sig = m.group(1)
         body = m.group(2)
@@ -996,6 +1015,14 @@ async def main():
             await run_test(session, "F2 get_customer_by_id all_fields False",
                 "get_customer_by_id", {"id": cust_id},
                 assert_fn=_assert_common_only)
+            # F1a: full customer response must NOT expose the token-heavy 'roles' key
+            await run_test(session, "F1a full customer has no roles",
+                "get_customer_by_id", {"id": cust_id, "include_all_fields": True},
+                assert_fn=_assert_has_no_roles)
+            # F1b: dedicated customer roles tool returns a roles list
+            await run_test(session, "F1b get_customer_roles_by_id",
+                "get_customer_roles_by_id", {"id": cust_id},
+                assert_fn=_assert_roles_list)
             # F3: Bulk list — include_all_fields=True returns full fields (rule 1)
             list_full = await run_test(session, "F3 list_all_customers all_fields True",
                 "list_all_customers", {"include_all_fields": True, "page_size": 10},
@@ -1054,6 +1081,30 @@ async def main():
                         results.append({"label": "F5a cleanup delete", "tool": dtool,
                             "status": "PASSED", "data": ddata})
                         log(f"  PASS F5a cleanup delete (exact shape verified)")
+            # F6: company roles — current company (id 1) returns a roles list
+            await run_test(session, "F6 get_company_roles_by_id",
+                "get_company_roles_by_id", {"company_id": 1},
+                assert_fn=_assert_roles_list)
+            # F7: company roles — bogus id returns empty roles + not-found error
+            bogus_company = await run_test(session, "F7 get_company_roles_by_id not found",
+                "get_company_roles_by_id", {"company_id": 999999},
+                assert_fn=_assert_roles_list)
+            if bogus_company is not None and isinstance(bogus_company, dict) and bogus_company.get("error") != "company not found":
+                results.append({"label": "F7 company roles not found error", "tool": "get_company_roles_by_id",
+                    "status": "FAILED", "reason": f"expected error 'company not found', got {bogus_company!r}"})
+                log(f"  FAIL F7 get_company_roles_by_id not found: {bogus_company!r}")
+            else:
+                results.append({"label": "F7 company roles not found error", "tool": "get_company_roles_by_id",
+                    "status": "PASSED"})
+                log("  PASS F7 get_company_roles_by_id not found error")
+            # F8: current user roles returns a roles list
+            await run_test(session, "F8 get_current_user_roles",
+                "get_current_user_roles", {},
+                assert_fn=_assert_roles_list)
+            # F8a: current company response must NOT expose the 'roles' key
+            await run_test(session, "F8a get_current_company has no roles",
+                "get_current_company", {},
+                assert_fn=_assert_has_no_roles)
         else:
             log("  SKIP Phase 4c: no customer_fixture available")
 
