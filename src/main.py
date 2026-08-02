@@ -371,21 +371,23 @@ async def get_recurring_invoice_frequency(frequency: str, starts_at: str, ctx: C
     return await get_client().get_recurring_invoice_frequency(get_user_token(), frequency=frequency, starts_at=starts_at)
 
 @mcp.tool(tags={"read", "advanced", "invoiceshelf"})
-async def get_exchange_rate(currency_id: int, ctx: Context = None) -> dict[str, Any]:
+async def get_exchange_rate(currency_id: int = None, ctx: Context = None) -> dict[str, Any]:
     """Get exchange rate for a currency.
 
     Args:
-        currency_id: ID of the currency.
+        currency_id: ID of the currency (defaults to company currency if omitted).
     """
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     return await get_client().get_exchange_rate(currency_id, get_user_token())
 
 @mcp.tool(tags={"read", "advanced", "invoiceshelf"})
-async def get_active_exchange_rate_provider(currency_id: int, ctx: Context = None) -> dict[str, Any]:
+async def get_active_exchange_rate_provider(currency_id: int = None, ctx: Context = None) -> dict[str, Any]:
     """Get active exchange rate provider for a currency.
 
     Args:
-        currency_id: ID of the currency.
+        currency_id: ID of the currency (defaults to company currency if omitted).
     """
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     return await get_client().get_active_exchange_rate_provider(currency_id, get_user_token())
 
 @mcp.tool(tags={"read", "advanced", "invoiceshelf"})
@@ -460,10 +462,11 @@ async def create_customer(name: str, email: str, password: str = "", phone: str 
         prefix: Customer number prefix (e.g. CUS).
         tax_id: Tax ID or VAT number.
         enable_portal: Enable customer portal access.
-        currency_id: Currency ID.
+        currency_id: Currency ID (defaults to company currency if omitted).
         billing: CustomerAddress object for the billing address.
         shipping: CustomerAddress object for the shipping address.
     """
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     payload = {"name": name, "email": email}
     if password:
         payload["password"] = password
@@ -704,6 +707,7 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
     template_name = InvoiceTemplateEnum.coerce(template_name)
     discount_type = DiscountTypeEnum.coerce(discount_type)
     tax_included = TrueFalseEnum.coerce(tax_included)
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     payload = _ensure_payload({
         "customer_id": customer_id, "invoice_number": invoice_number, "invoice_date": invoice_date,
         "template_name": template_name, "discount": discount, "discount_val": discount_val,
@@ -918,6 +922,7 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
     template_name = EstimateTemplateEnum.coerce(template_name)
     discount_type = DiscountTypeEnum.coerce(discount_type)
     tax_included = TrueFalseEnum.coerce(tax_included)
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     payload = _ensure_payload({
         "customer_id": customer_id, "estimate_number": estimate_number, "estimate_date": estimate_date,
         "template_name": template_name, "discount": discount, "discount_val": discount_val,
@@ -1115,20 +1120,21 @@ async def get_expense_by_id(id: int, include_all_fields: bool = False, ctx: Cont
     return await get_client().get_expense_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
-async def create_expense(expense_date: str, expense_category_id: int, amount: float, currency_id: int, expense_number: str = "", payment_method_id: str = "", customer_id: str = "", notes: str = "", exchange_rate: str = "", ctx: Context = None) -> dict[str, Any]:
+async def create_expense(expense_date: str, expense_category_id: int, amount: float, currency_id: int = None, expense_number: str = "", payment_method_id: str = "", customer_id: str = "", notes: str = "", exchange_rate: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new expense.
 
     Args:
         expense_date: Expense date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD, e.g. 2026-06-22).
         expense_category_id: ID of the expense category.
         amount: Expense amount, >= 0 (e.g. 100.00).
-        currency_id: ID of the currency.
+        currency_id: ID of the currency (defaults to company currency if omitted).
         expense_number: Expense number (e.g. EXP-0001).
         payment_method_id: ID of the payment method.
         customer_id: ID of the customer.
         notes: Expense notes.
         exchange_rate: Exchange rate as a numeric string (e.g. 1.0) (Default: 1).
     """
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     payload = _ensure_payload({"expense_date": expense_date, "expense_category_id": expense_category_id, "amount": amount, "currency_id": currency_id}, {"exchange_rate": "1"})
     for k, v in [("expense_number", expense_number), ("payment_method_id", payment_method_id), ("customer_id", customer_id), ("notes", notes), ("exchange_rate", exchange_rate)]:
         if v:
@@ -1155,6 +1161,10 @@ async def update_expense(id: int, expense_date: str = None, expense_category_id:
     for k, v in [("expense_date", expense_date), ("expense_category_id", expense_category_id), ("amount", amount), ("currency_id", currency_id), ("expense_number", expense_number), ("payment_method_id", payment_method_id), ("customer_id", customer_id), ("notes", notes), ("exchange_rate", exchange_rate)]:
         if v is not None:
             payload[k] = v
+    if "currency_id" not in payload:
+        payload["currency_id"] = await get_client().resolve_company_currency_id(get_user_token())
+    if "exchange_rate" not in payload:
+        payload["exchange_rate"] = "1"
     return await get_client().update_expense(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
@@ -1277,10 +1287,11 @@ async def create_payment(payment_date: str, customer_id: int, amount: float, pay
         invoice_id: ID of the invoice to apply the payment to.
         payment_method_id: ID of the payment method.
         notes: Payment notes.
-        currency_id: Currency ID.
-        exchange_rate: Exchange rate as a numeric string (e.g. 1.0).
+        currency_id: Currency ID (defaults to company currency if omitted).
+        exchange_rate: Exchange rate as a numeric string (e.g. 1.0) (Default: 1).
     """
-    payload = _ensure_payload({"payment_date": payment_date, "customer_id": customer_id, "amount": amount, "payment_number": payment_number}, {})
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
+    payload = _ensure_payload({"payment_date": payment_date, "customer_id": customer_id, "amount": amount, "payment_number": payment_number, "currency_id": currency_id}, {"exchange_rate": "1"})
     for k, v in [("invoice_id", invoice_id), ("payment_method_id", payment_method_id), ("notes", notes), ("currency_id", currency_id), ("exchange_rate", exchange_rate)]:
         if v:
             payload[k] = v
@@ -1306,6 +1317,10 @@ async def update_payment(id: int, payment_date: str = None, customer_id: int = N
     for k, v in [("payment_date", payment_date), ("customer_id", customer_id), ("amount", amount), ("payment_number", payment_number), ("invoice_id", invoice_id), ("payment_method_id", payment_method_id), ("notes", notes), ("currency_id", currency_id), ("exchange_rate", exchange_rate)]:
         if v is not None:
             payload[k] = v
+    if "exchange_rate" not in payload:
+        payload["exchange_rate"] = "1"
+    if "currency_id" not in payload:
+        payload["currency_id"] = await get_client().resolve_company_currency_id(get_user_token())
     return await get_client().update_payment(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
@@ -1688,6 +1703,7 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
     """
     status = RecurringStatusEnum.coerce(status)
     limit_by = LimitByEnum.coerce(limit_by)
+    currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     payload = _ensure_payload({
         "customer_id": customer_id, "starts_at": starts_at, "frequency": frequency, "status": status,
         "limit_by": limit_by, "send_automatically": send_automatically, "discount": discount,

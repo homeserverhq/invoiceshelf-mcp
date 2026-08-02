@@ -171,6 +171,7 @@ class InvoiceShelfClient:
         self._currency_seeding: bool = False
         self._bootstrap_seeded: bool = False
         self._company_default_precision: int = 2
+        self._company_currency_id: Optional[int] = None
 
     def _get_headers(self, api_key: Optional[str] = None) -> dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -280,8 +281,18 @@ class InvoiceShelfClient:
             ccc = (unwrapped or {}).get("current_company_currency") or {}
             if ccc.get("precision") is not None:
                 self._company_default_precision = int(ccc["precision"])
+            if ccc.get("id") is not None:
+                self._company_currency_id = int(ccc["id"])
         except Exception:
             self._company_default_precision = 2
+
+    async def resolve_company_currency_id(self, api_key: Optional[str] = None, provided: Any = None) -> int:
+        if provided not in (None, "", 0):
+            return int(provided)
+        await self._ensure_company_currency(api_key)
+        if self._company_currency_id is None:
+            raise RuntimeError("Unable to resolve company default currency; specify currency_id explicitly")
+        return self._company_currency_id
 
     def _get_precision(self, currency_id: Any) -> int:
         if currency_id is not None:
