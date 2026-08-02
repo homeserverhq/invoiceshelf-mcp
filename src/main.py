@@ -769,7 +769,7 @@ async def update_invoice(id: int, customer_id: int = None, invoice_number: str =
     if custom_fields:
         payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
     if isinstance(current, dict):
-        for k in ("customer_id", "invoice_number", "invoice_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax"):
+        for k in ("customer_id", "invoice_number", "invoice_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax", "exchange_rate"):
             if k not in payload:
                 v = current.get(k)
                 if v is not None:
@@ -983,7 +983,7 @@ async def update_estimate(id: int, customer_id: int = None, estimate_number: str
     if custom_fields:
         payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
     if isinstance(current, dict):
-        for k in ("customer_id", "estimate_number", "estimate_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax"):
+        for k in ("customer_id", "estimate_number", "estimate_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax", "exchange_rate"):
             if k not in payload:
                 v = current.get(k)
                 if v is not None:
@@ -1748,7 +1748,7 @@ async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: 
     if taxes:
         payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
     if isinstance(current, dict):
-        for k in ("customer_id", "starts_at", "frequency", "status", "limit_by", "send_automatically", "discount", "discount_val", "sub_total", "total", "tax"):
+        for k in ("customer_id", "starts_at", "frequency", "status", "limit_by", "send_automatically", "discount", "discount_val", "sub_total", "total", "tax", "limit_count", "limit_date", "exchange_rate", "notes"):
             if k not in payload:
                 v = current.get(k)
                 if v is not None:
