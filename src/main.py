@@ -62,24 +62,15 @@ class InvoiceLineItem(BaseModel):
     price: float = Field(description="Unit price in the document currency, >= 0 (e.g. 100.00)")
     description: str = Field(default="", description="Line item description")
 
-class InvoiceLineItems(BaseModel):
-    items: list[InvoiceLineItem] = Field(default_factory=list, description="List of invoice line items")
-
 class TaxItem(BaseModel):
     tax_type_id: int = Field(description="ID of the tax type")
     name: str = Field(description="Tax name (e.g. VAT)")
     percent: float = Field(description="Tax percentage, 0-100 (e.g. 21)")
     amount: float = Field(description="Tax amount in the document currency (e.g. 21.00)")
 
-class TaxesParam(BaseModel):
-    taxes: list[TaxItem] = Field(default_factory=list, description="List of taxes applied to the document")
-
 class CustomFieldItem(BaseModel):
     custom_field_id: int = Field(description="ID of the custom field")
     value: str = Field(description="Value for the custom field (e.g. INV-2026-0001)")
-
-class CustomFieldsParam(BaseModel):
-    customFields: list[CustomFieldItem] = Field(default_factory=list, description="List of custom field values")
 
 class CustomerAddress(BaseModel):
     name: str = Field(default="", description="Address label/recipient name")
@@ -94,9 +85,6 @@ class CustomerAddress(BaseModel):
 
 class RoleAbility(BaseModel):
     ability: str = Field(description="Ability key, e.g. customers.create, invoices.view, or expenses.delete")
-
-class RoleAbilities(BaseModel):
-    abilities: list[RoleAbility] = Field(description="List of role abilities to grant to the role")
 
 # =============================================================================
 # Case-Insensitive Enums
@@ -681,7 +669,7 @@ async def get_invoice_by_id(id: int, include_all_fields: bool = False, ctx: Cont
     return await get_client().get_invoice_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
-async def create_invoice(customer_id: int, invoice_number: str, invoice_date: str, template_name: str, items: InvoiceLineItems, due_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: TaxesParam = None, custom_fields: CustomFieldsParam = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
+async def create_invoice(customer_id: int, invoice_number: str, invoice_date: str, template_name: str, items: list[InvoiceLineItem], due_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new invoice.
 
     Args:
@@ -689,7 +677,7 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
         invoice_number: Unique invoice number (e.g. INV-0001).
         invoice_date: Invoice date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD, e.g. 2026-06-22).
         template_name: Invoice template: invoice1, invoice2, or invoice3.
-        items: InvoiceLineItems object, e.g. {"items": [{"name": "Consulting", "quantity": 1, "price": 100.00}]}.
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         due_date: Due date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         discount: Discount amount, >= 0.
         discount_val: Discount value (percentage points for a percentage discount), >= 0.
@@ -698,8 +686,8 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
         tax: Tax amount, >= 0; recomputed server-side.
         exchange_rate: Exchange rate as a numeric string (e.g. 1.0) (Default: 1).
         notes: Invoice notes.
-        taxes: TaxesParam object, e.g. {"taxes": [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}]}.
-        custom_fields: CustomFieldsParam object with custom field values.
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
+        custom_fields: List of custom field values, e.g. [{"custom_field_id": 1, "value": "INV-2026-0001"}].
         discount_type: none, fixed, or percentage.
         tax_included: Whether tax is included in prices: true or false.
         currency_id: Currency ID.
@@ -713,7 +701,7 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
         "template_name": template_name, "discount": discount, "discount_val": discount_val,
         "sub_total": sub_total, "total": total, "tax": tax,
     }, {"exchange_rate": "1"})
-    items_list = items.model_dump(exclude_unset=True)["items"] if isinstance(items, InvoiceLineItems) else (items or [])
+    items_list = [it.model_dump(exclude_unset=True) for it in items]
     for it in items_list:
         it.setdefault("discount_val", 0)
         it.setdefault("discount_type", "none")
@@ -723,13 +711,13 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
         if v:
             payload[k] = v
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     if custom_fields:
-        payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
+        payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     return await get_client().create_invoice(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
-async def update_invoice(id: int, customer_id: int = None, invoice_number: str = None, invoice_date: str = None, template_name: str = None, items: InvoiceLineItems = None, due_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: TaxesParam = None, custom_fields: CustomFieldsParam = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
+async def update_invoice(id: int, customer_id: int = None, invoice_number: str = None, invoice_date: str = None, template_name: str = None, items: list[InvoiceLineItem] = None, due_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing invoice.
 
     Args:
@@ -738,7 +726,7 @@ async def update_invoice(id: int, customer_id: int = None, invoice_number: str =
         invoice_number: Updated invoice number.
         invoice_date: Invoice date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         template_name: Invoice template: invoice1, invoice2, or invoice3.
-        items: Updated line items (InvoiceLineItems).
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         due_date: Due date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         discount: Updated discount amount, >= 0.
         discount_val: Updated discount value, >= 0.
@@ -747,8 +735,8 @@ async def update_invoice(id: int, customer_id: int = None, invoice_number: str =
         tax: Updated tax amount, >= 0.
         exchange_rate: Updated exchange rate as a numeric string.
         notes: Updated invoice notes.
-        taxes: Updated taxes (TaxesParam).
-        custom_fields: Updated custom fields (CustomFieldsParam).
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
+        custom_fields: List of custom field values.
         discount_type: none, fixed, or percentage.
         tax_included: Whether tax is included in prices: true or false.
         currency_id: Updated currency ID.
@@ -762,16 +750,16 @@ async def update_invoice(id: int, customer_id: int = None, invoice_number: str =
         if v is not None:
             payload[k] = v
     if items:
-        items_list = items.model_dump(exclude_unset=True)["items"]
+        items_list = [it.model_dump(exclude_unset=True) for it in items]
         for it in items_list:
             it.setdefault("discount_val", 0)
             it.setdefault("discount_type", "none")
             it.setdefault("tax", 0)
         payload["items"] = items_list
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     if custom_fields:
-        payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
+        payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     if isinstance(current, dict):
         for k in ("customer_id", "invoice_number", "invoice_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax", "exchange_rate"):
             if k not in payload:
@@ -896,7 +884,7 @@ async def get_estimate_by_id(id: int, include_all_fields: bool = False, ctx: Con
     return await get_client().get_estimate_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
-async def create_estimate(customer_id: int, estimate_number: str, estimate_date: str, template_name: str, items: InvoiceLineItems, expiry_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: TaxesParam = None, custom_fields: CustomFieldsParam = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
+async def create_estimate(customer_id: int, estimate_number: str, estimate_date: str, template_name: str, items: list[InvoiceLineItem], expiry_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new estimate.
 
     Args:
@@ -904,7 +892,7 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
         estimate_number: Unique estimate number (e.g. EST-0001).
         estimate_date: Estimate date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD, e.g. 2026-06-22).
         template_name: Estimate template: estimate1, estimate2, or estimate3.
-        items: InvoiceLineItems object, e.g. {"items": [{"name": "Consulting", "quantity": 1, "price": 100.00}]}.
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         expiry_date: Expiry date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         discount: Discount amount, >= 0.
         discount_val: Discount value, >= 0.
@@ -913,8 +901,8 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
         tax: Tax amount, >= 0; recomputed server-side.
         exchange_rate: Exchange rate as a numeric string (e.g. 1.0) (Default: 1).
         notes: Estimate notes.
-        taxes: TaxesParam object.
-        custom_fields: CustomFieldsParam object.
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
+        custom_fields: List of custom field values.
         discount_type: none, fixed, or percentage.
         tax_included: Whether tax is included in prices: true or false.
         currency_id: Currency ID.
@@ -928,7 +916,7 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
         "template_name": template_name, "discount": discount, "discount_val": discount_val,
         "sub_total": sub_total, "total": total, "tax": tax,
     }, {"exchange_rate": "1"})
-    items_list = items.model_dump(exclude_unset=True)["items"] if isinstance(items, InvoiceLineItems) else (items or [])
+    items_list = [it.model_dump(exclude_unset=True) for it in items]
     for it in items_list:
         it.setdefault("discount_val", 0)
         it.setdefault("discount_type", "none")
@@ -938,13 +926,13 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
         if v:
             payload[k] = v
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     if custom_fields:
-        payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
+        payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     return await get_client().create_estimate(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
-async def update_estimate(id: int, customer_id: int = None, estimate_number: str = None, estimate_date: str = None, template_name: str = None, items: InvoiceLineItems = None, expiry_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: TaxesParam = None, custom_fields: CustomFieldsParam = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
+async def update_estimate(id: int, customer_id: int = None, estimate_number: str = None, estimate_date: str = None, template_name: str = None, items: list[InvoiceLineItem] = None, expiry_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing estimate.
 
     Args:
@@ -953,7 +941,7 @@ async def update_estimate(id: int, customer_id: int = None, estimate_number: str
         estimate_number: Updated estimate number.
         estimate_date: Estimate date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         template_name: Estimate template: estimate1, estimate2, or estimate3.
-        items: Updated line items (InvoiceLineItems).
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         expiry_date: Expiry date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         discount: Updated discount amount, >= 0.
         discount_val: Updated discount value, >= 0.
@@ -962,8 +950,8 @@ async def update_estimate(id: int, customer_id: int = None, estimate_number: str
         tax: Updated tax amount, >= 0.
         exchange_rate: Updated exchange rate as a numeric string.
         notes: Updated estimate notes.
-        taxes: Updated taxes (TaxesParam).
-        custom_fields: Updated custom fields (CustomFieldsParam).
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
+        custom_fields: List of custom field values.
         discount_type: none, fixed, or percentage.
         tax_included: Whether tax is included in prices: true or false.
         currency_id: Updated currency ID.
@@ -977,16 +965,16 @@ async def update_estimate(id: int, customer_id: int = None, estimate_number: str
         if v is not None:
             payload[k] = v
     if items:
-        items_list = items.model_dump(exclude_unset=True)["items"]
+        items_list = [it.model_dump(exclude_unset=True) for it in items]
         for it in items_list:
             it.setdefault("discount_val", 0)
             it.setdefault("discount_type", "none")
             it.setdefault("tax", 0)
         payload["items"] = items_list
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     if custom_fields:
-        payload["customFields"] = custom_fields.model_dump(exclude_unset=True).get("customFields", [])
+        payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     if isinstance(current, dict):
         for k in ("customer_id", "estimate_number", "estimate_date", "template_name", "discount", "discount_val", "sub_total", "total", "tax", "exchange_rate"):
             if k not in payload:
@@ -1678,7 +1666,7 @@ async def get_recurring_invoice_by_id(id: int, include_all_fields: bool = False,
     return await get_client().get_recurring_invoice_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
-async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: str, status: str, limit_by: str, send_automatically: bool, items: InvoiceLineItems, limit_count: str = "", limit_date: str = "", exchange_rate: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, taxes: TaxesParam = None, currency_id: str = "", notes: str = "", ctx: Context = None) -> dict[str, Any]:
+async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: str, status: str, limit_by: str, send_automatically: bool, items: list[InvoiceLineItem], limit_count: str = "", limit_date: str = "", exchange_rate: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, taxes: list[TaxItem] = None, currency_id: str = "", notes: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new recurring invoice template.
 
     Args:
@@ -1688,7 +1676,7 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
         status: active, on_hold, or completed (Default: active).
         limit_by: count or date.
         send_automatically: Send generated invoices automatically: true or false.
-        items: InvoiceLineItems object, e.g. {"items": [{"name": "Consulting", "quantity": 1, "price": 100.00}]}.
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         limit_count: Number of invoices to generate before stopping, >= 1 (e.g. 12). Required when limit_by is COUNT.
         limit_date: End date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD, e.g. 2026-06-22). Required when limit_by is DATE.
         exchange_rate: Exchange rate as a numeric string (e.g. 1.0) (Default: 1).
@@ -1697,7 +1685,7 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
         sub_total: Sub total, >= 0; recomputed server-side.
         total: Grand total, >= 0; recomputed server-side.
         tax: Tax amount, >= 0; recomputed server-side.
-        taxes: TaxesParam object.
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
         currency_id: Currency ID.
         notes: Notes.
     """
@@ -1709,7 +1697,7 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
         "limit_by": limit_by, "send_automatically": send_automatically, "discount": discount,
         "discount_val": discount_val, "sub_total": sub_total, "total": total, "tax": tax,
     }, {"exchange_rate": "1"})
-    items_list = items.model_dump(exclude_unset=True)["items"] if isinstance(items, InvoiceLineItems) else (items or [])
+    items_list = [it.model_dump(exclude_unset=True) for it in items]
     for it in items_list:
         it.setdefault("discount_val", 0)
         it.setdefault("discount_type", "none")
@@ -1719,11 +1707,11 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
         if v:
             payload[k] = v
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     return await get_client().create_recurring_invoice(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
-async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: str = None, frequency: str = None, status: str = None, limit_by: str = None, send_automatically: bool = None, items: InvoiceLineItems = None, limit_count: str = None, limit_date: str = None, exchange_rate: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, taxes: TaxesParam = None, currency_id: str = None, notes: str = None, ctx: Context = None) -> dict[str, Any]:
+async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: str = None, frequency: str = None, status: str = None, limit_by: str = None, send_automatically: bool = None, items: list[InvoiceLineItem] = None, limit_count: str = None, limit_date: str = None, exchange_rate: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, taxes: list[TaxItem] = None, currency_id: str = None, notes: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing recurring invoice.
 
     Args:
@@ -1734,7 +1722,7 @@ async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: 
         status: active, on_hold, or completed.
         limit_by: count or date.
         send_automatically: Updated auto-send flag: true or false.
-        items: Updated items (InvoiceLineItems).
+        items: List of line items, e.g. [{"name": "Consulting", "quantity": 1, "price": 100.00}].
         limit_count: Updated limit count.
         limit_date: Updated limit date in ISO 8601 format (2026-06-22T15:00:00-04:00); only the date is stored (YYYY-MM-DD).
         exchange_rate: Updated exchange rate as a numeric string.
@@ -1743,7 +1731,7 @@ async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: 
         sub_total: Updated sub total, >= 0.
         total: Updated grand total, >= 0.
         tax: Updated tax amount, >= 0.
-        taxes: Updated taxes (TaxesParam).
+        taxes: List of taxes, e.g. [{"tax_type_id": 1, "name": "VAT", "percent": 21, "amount": 21.00}].
         currency_id: Updated currency ID.
         notes: Updated notes.
     """
@@ -1755,14 +1743,14 @@ async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: 
         if v is not None:
             payload[k] = v
     if items:
-        items_list = items.model_dump(exclude_unset=True)["items"]
+        items_list = [it.model_dump(exclude_unset=True) for it in items]
         for it in items_list:
             it.setdefault("discount_val", 0)
             it.setdefault("discount_type", "none")
             it.setdefault("tax", 0)
         payload["items"] = items_list
     if taxes:
-        payload["taxes"] = taxes.model_dump(exclude_unset=True).get("taxes", [])
+        payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     if isinstance(current, dict):
         for k in ("customer_id", "starts_at", "frequency", "status", "limit_by", "send_automatically", "discount", "discount_val", "sub_total", "total", "tax", "limit_count", "limit_date", "exchange_rate", "notes"):
             if k not in payload:
@@ -1816,30 +1804,30 @@ async def get_role_by_id(id: int, include_all_fields: bool = False, ctx: Context
     return await get_client().get_role_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
 @mcp.tool(tags={"write", "basic", "invoiceshelf"})
-async def create_role(name: str, abilities: RoleAbilities, ctx: Context = None) -> dict[str, Any]:
+async def create_role(name: str, abilities: list[RoleAbility], ctx: Context = None) -> dict[str, Any]:
     """Create a new role with abilities.
 
     Args:
         name: Name of the role (e.g. Manager).
-        abilities: RoleAbilities object listing the abilities to grant, e.g. {"abilities": [{"ability": "customers.create"}, {"ability": "invoices.view"}]}.
+        abilities: List of RoleAbility objects to grant, e.g. [{"ability": "customers.create"}, {"ability": "invoices.view"}].
     """
-    payload = {"name": name, "abilities": [{"ability": a.ability} for a in abilities.abilities]}
+    payload = {"name": name, "abilities": [{"ability": a.ability} for a in abilities]}
     return await get_client().create_role(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})
-async def update_role(id: int, name: str = None, abilities: RoleAbilities = None, ctx: Context = None) -> dict[str, Any]:
+async def update_role(id: int, name: str = None, abilities: list[RoleAbility] = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing role.
 
     Args:
         id: The unique ID of the role to update.
         name: Updated name of the role.
-        abilities: RoleAbilities object listing the abilities to grant, e.g. {"abilities": [{"ability": "customers.create"}]}.
+        abilities: List of RoleAbility objects to grant, e.g. [{"ability": "customers.create"}].
     """
     payload = {}
     if name is not None:
         payload["name"] = name
     if abilities is not None:
-        payload["abilities"] = [{"ability": a.ability} for a in abilities.abilities]
+        payload["abilities"] = [{"ability": a.ability} for a in abilities]
     return await get_client().update_role(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
 @mcp.tool(tags={"write", "primary", "invoiceshelf"})

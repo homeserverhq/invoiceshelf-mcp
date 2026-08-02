@@ -856,14 +856,14 @@ async def main():
             "delete_custom_field_by_id", "list_all_custom_fields", None, "name")
 
         await _run_crud_for(session, "role", "create_role",
-            {"name": make_name("Role"), "abilities": {"abilities": [{"ability": "*"}]}},
+            {"name": make_name("Role"), "abilities": [{"ability": "*"}]},
             "get_role_by_id", "update_role",
-            {"name": make_name("Role-upd"), "abilities": {"abilities": [{"ability": "*"}]}},
+            {"name": make_name("Role-upd"), "abilities": [{"ability": "*"}]},
             "delete_role_by_id", "list_all_roles", None, "name")
 
         await _run_crud_for(session, "invoice", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("INV"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
+             "template_name": "invoice1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]},
             "get_invoice_by_id", "update_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("INV-upd"), "invoice_date": today_iso,
              "template_name": "invoice1", "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0},
@@ -871,7 +871,7 @@ async def main():
 
         await _run_crud_for(session, "estimate", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]},
             "get_estimate_by_id", "update_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-upd"), "estimate_date": today_iso,
              "template_name": "estimate1", "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0},
@@ -896,13 +896,13 @@ async def main():
             {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "ACTIVE", "limit_by": "COUNT", "limit_count": "5", "send_automatically": False,
              "exchange_rate": "1",
-             "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
+             "items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]},
             "get_recurring_invoice_by_id", "update_recurring_invoice",
             {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "ON_HOLD", "limit_by": "COUNT", "limit_count": "3", "send_automatically": False,
              "discount": 0, "discount_val": 0, "sub_total": 0, "total": 0, "tax": 0,
              "exchange_rate": "1",
-             "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]}},
+             "items": [{"name": make_name("Item"), "quantity": 1, "price": 100}]},
             "delete_recurring_invoices_by_id", "list_all_recurring_invoices", {"page_size": 0}, "status")
 
         # ------------------------------------------------------------------
@@ -971,7 +971,7 @@ async def main():
         # D11 clone_invoice
         inv_clone_data = await run_test(session, "D11 create_inv_for_clone", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("CLN"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "invoice1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_inv_clone_orig"] = _int_id(_dict_id(inv_clone_data))
         inv_clone_result = await run_test(session, "D11 clone_invoice", "clone_invoice",
             {"id": IDS["id_inv_clone_orig"]},
@@ -981,7 +981,7 @@ async def main():
         # D12 clone_estimate
         est_clone_data = await run_test(session, "D12 create_est_for_clone", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-CLN"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_est_clone_orig"] = _int_id(_dict_id(est_clone_data))
         est_clone_result = await run_test(session, "D12 clone_estimate", "clone_estimate",
             {"id": IDS["id_est_clone_orig"]},
@@ -991,7 +991,7 @@ async def main():
         # D13 change_invoice_status
         inv_status_data = await run_test(session, "D13 create_inv_for_status", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("ST"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "invoice1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_inv_status"] = _int_id(_dict_id(inv_status_data))
         await run_test(session, "D13 change_invoice_status", "change_invoice_status",
             {"id": IDS["id_inv_status"], "status": "SENT"}, assert_fn=_assert_success_true)
@@ -999,7 +999,7 @@ async def main():
         # D14 change_estimate_status
         est_status_data = await run_test(session, "D14 create_est_for_status", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-ST"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_est_status"] = _int_id(_dict_id(est_status_data))
         await run_test(session, "D14 change_estimate_status", "change_estimate_status",
             {"id": IDS["id_est_status"], "status": "SENT"}, assert_fn=_assert_success_true)
@@ -1007,7 +1007,7 @@ async def main():
         # D15 convert_estimate_to_invoice
         est_convert_data = await run_test(session, "D15 create_est_for_convert", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-CNV"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_est_convert"] = _int_id(_dict_id(est_convert_data))
         convert_result = await run_test(session, "D15 convert_estimate_to_invoice", "convert_estimate_to_invoice",
             {"id": IDS["id_est_convert"]}, assert_fn=lambda d: _assert_has_keys(d, "id"))
@@ -1034,7 +1034,7 @@ async def main():
         # D19 send_invoice
         inv_send_data = await run_test(session, "D19 create_inv_for_send", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("SND"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "invoice1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_inv_send"] = _int_id(_dict_id(inv_send_data))
         await run_test(session, "D19 send_invoice", "send_invoice",
             {"id": IDS["id_inv_send"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
@@ -1043,7 +1043,7 @@ async def main():
         # D20 send_estimate
         est_send_data = await run_test(session, "D20 create_est_for_send", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-SND"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_est_send"] = _int_id(_dict_id(est_send_data))
         await run_test(session, "D20 send_estimate", "send_estimate",
             {"id": IDS["id_est_send"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
@@ -1060,7 +1060,7 @@ async def main():
         # D22 get_invoice_send_preview
         inv_preview_data = await run_test(session, "D22 create_inv_for_preview", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("PRV"), "invoice_date": today_iso,
-             "template_name": "invoice1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "invoice1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_inv_preview"] = _int_id(_dict_id(inv_preview_data))
         await run_test(session, "D22 get_invoice_send_preview", "get_invoice_send_preview",
             {"id": IDS["id_inv_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
@@ -1069,7 +1069,7 @@ async def main():
         # D23 get_estimate_send_preview
         est_preview_data = await run_test(session, "D23 create_est_for_preview", "create_estimate",
             {"customer_id": inv_cust, "estimate_number": make_name("EST-PRV"), "estimate_date": today_iso,
-             "template_name": "estimate1", "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]}})
+             "template_name": "estimate1", "items": [{"name": make_name("Item"), "quantity": 1, "price": 50}]})
         IDS["id_est_preview"] = _int_id(_dict_id(est_preview_data))
         await run_test(session, "D23 get_estimate_send_preview", "get_estimate_send_preview",
             {"id": IDS["id_est_preview"], "to": TEST_EMAIL_TO, "from_": TEST_EMAIL_FROM,
@@ -1107,11 +1107,11 @@ async def main():
         await _reject("E3 get_next_number bad key", "get_next_number", {"key": "banana"})
         await _reject("E4 create_invoice bad template_name", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("REJ"), "invoice_date": today_iso,
-             "template_name": "bogus", "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+             "template_name": "bogus", "items": [{"name": "x", "quantity": 1, "price": 1}]})
         await _reject("E5 create_invoice bad discount_type", "create_invoice",
             {"customer_id": inv_cust, "invoice_number": make_name("REJ2"), "invoice_date": today_iso,
              "template_name": "invoice1", "discount_type": "banana",
-             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+             "items": [{"name": "x", "quantity": 1, "price": 1}]})
         await _reject("E6 create_custom_field bad model_type", "create_custom_field",
             {"name": make_name("RejField"), "label": f"{rid} Rej", "model_type": "Banana",
              "order": 1, "type": "INPUT", "is_required": False})
@@ -1129,11 +1129,11 @@ async def main():
         await _reject("E12 create_recurring_invoice bad status", "create_recurring_invoice",
             {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "BOGUS", "limit_by": "COUNT", "send_automatically": False,
-             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+             "items": [{"name": "x", "quantity": 1, "price": 1}]})
         await _reject("E13 create_recurring_invoice bad limit_by", "create_recurring_invoice",
             {"customer_id": inv_cust, "starts_at": today_iso, "frequency": "0 0 1 * *",
              "status": "ACTIVE", "limit_by": "NEVER", "send_automatically": False,
-             "items": {"items": [{"name": "x", "quantity": 1, "price": 1}]}})
+             "items": [{"name": "x", "quantity": 1, "price": 1}]})
         await _reject("E14 list_supported_currencies bad driver", "list_supported_currencies",
             {"driver": "nonsense", "key": "test"})
         await _reject("E15 update_tax_type bad compound_tax", "update_tax_type",
@@ -1285,7 +1285,7 @@ async def main():
                 "create_invoice", {
                     "customer_id": cust_id, "invoice_number": g2_num,
                     "invoice_date": "2026-01-15", "template_name": "invoice1",
-                    "items": {"items": [{"name": make_name("Mon"), "quantity": 1, "price": 8}]},
+                    "items": [{"name": make_name("Mon"), "quantity": 1, "price": 8}],
                 },
                 assert_fn=_assert_not_empty)
             g2_id = _int_id(_dict_id(g2_inv))
@@ -1327,7 +1327,7 @@ async def main():
                 "create_invoice", {
                     "customer_id": cust_id, "invoice_number": g2b_num,
                     "invoice_date": "2026-01-15", "template_name": "invoice1",
-                    "items": {"items": [{"name": make_name("Disc"), "quantity": 1, "price": 10}]},
+                    "items": [{"name": make_name("Disc"), "quantity": 1, "price": 10}],
                     "discount_type": "fixed", "discount_val": 1,
                 },
                 assert_fn=_assert_not_empty)
@@ -1487,7 +1487,7 @@ async def main():
             "create_invoice", {
                 "customer_id": cust_id, "invoice_number": make_name("PUB"),
                 "invoice_date": "2026-01-15", "template_name": "invoice1",
-                "items": {"items": [{"name": make_name("Item"), "quantity": 1, "price": 20}]},
+                "items": [{"name": make_name("Item"), "quantity": 1, "price": 20}],
             },
             assert_fn=_assert_not_empty)
         h1_id = _int_id(_dict_id(h1_inv))
