@@ -1743,7 +1743,7 @@ def _is_test_artifact(name: str) -> bool:
 def static_tool_names() -> list[str]:
     src_path = Path(__file__).with_name("main.py")
     text = src_path.read_text(encoding="utf-8")
-    names = re.findall(r"@mcp\.tool\([^\n]*\)\s*\n\s*async def (\w+)\s*\(", text)
+    names = re.findall(r"@mcp\.tool\(.*?\n\s*async def (\w+)\s*\(", text, re.DOTALL)
     return sorted(names)
 
 

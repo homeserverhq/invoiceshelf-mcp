@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any, Optional
 
 from fastmcp import FastMCP, Context
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 from toon_mcp import json_to_toon
 
@@ -196,12 +197,16 @@ def _full_model_type(value: str) -> str:
 # Domain Tools (21)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Check Server Status", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def check_server_status(ctx: Context = None) -> dict[str, Any]:
     """Check connectivity to the InvoiceShelf backend."""
     return await get_client().check_server_status(get_user_token())
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Dashboard", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_dashboard(previous_year: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get dashboard analytics data.
 
@@ -210,12 +215,16 @@ async def get_dashboard(previous_year: bool = False, ctx: Context = None) -> dic
     """
     return await get_client().get_dashboard(get_user_token(), previous_year=previous_year)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Bootstrap", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_bootstrap(ctx: Context = None) -> dict[str, Any]:
     """Get app bootstrap data including company currency info."""
     return await get_client().get_bootstrap(get_user_token())
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Search Customers And Users", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def search_customers_and_users(search: str = "", ctx: Context = None) -> dict[str, Any]:
     """Search customers and users.
 
@@ -224,7 +233,9 @@ async def search_customers_and_users(search: str = "", ctx: Context = None) -> d
     """
     return await get_client().search_customers_and_users(get_user_token(), search=search)
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="Search Users", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def search_users(email: str = "", ctx: Context = None) -> dict[str, Any]:
     """Search users by email.
 
@@ -233,7 +244,9 @@ async def search_users(email: str = "", ctx: Context = None) -> dict[str, Any]:
     """
     return await get_client().search_users(get_user_token(), email=email)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Currencies", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_currencies(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all currencies.
 
@@ -243,7 +256,9 @@ async def list_all_currencies(include_all_fields: bool = False, ctx: Context = N
     data = await get_client().list_all_currencies(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="List Used Currencies", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_used_currencies(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List currencies that have been used in transactions.
 
@@ -252,7 +267,9 @@ async def list_used_currencies(include_all_fields: bool = False, ctx: Context = 
     """
     return await get_client().list_used_currencies(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Countries", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_countries(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all countries.
 
@@ -262,7 +279,9 @@ async def list_all_countries(include_all_fields: bool = False, ctx: Context = No
     data = await get_client().list_all_countries(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List Timezones", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_timezones(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all timezones.
 
@@ -271,7 +290,9 @@ async def list_timezones(include_all_fields: bool = False, ctx: Context = None) 
     """
     return await get_client().list_timezones(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List Date Formats", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_date_formats(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List available date formats.
 
@@ -280,7 +301,9 @@ async def list_date_formats(include_all_fields: bool = False, ctx: Context = Non
     """
     return await get_client().list_date_formats(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List Time Formats", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_time_formats(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List available time formats.
 
@@ -289,7 +312,9 @@ async def list_time_formats(include_all_fields: bool = False, ctx: Context = Non
     """
     return await get_client().list_time_formats(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Next Number", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_next_number(key: str, user_id: str = "", model_id: str = "", ctx: Context = None) -> dict[str, Any]:
     """Get the next number for invoice, estimate, or payment.
 
@@ -301,7 +326,9 @@ async def get_next_number(key: str, user_id: str = "", model_id: str = "", ctx: 
     key = NextNumberKeyEnum.coerce(key)
     return await get_client().get_next_number(get_user_token(), key=key, user_id=user_id, model_id=model_id)
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Number Placeholders", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_number_placeholders(format: str = "", ctx: Context = None) -> dict[str, Any]:
     """Get number format placeholders.
 
@@ -310,12 +337,16 @@ async def get_number_placeholders(format: str = "", ctx: Context = None) -> dict
     """
     return await get_client().get_number_placeholders(get_user_token(), format_str=format)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Current Company", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_current_company(ctx: Context = None) -> dict[str, Any]:
     """Get current company information."""
     return await get_client().get_current_company(get_user_token())
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Company Roles By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_company_roles_by_id(company_id: int, ctx: Context = None) -> dict[str, Any]:
     """Get the roles for a company.
 
@@ -324,12 +355,16 @@ async def get_company_roles_by_id(company_id: int, ctx: Context = None) -> dict[
     """
     return await get_client().get_company_roles_by_id(company_id, get_user_token())
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Current User Roles", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_current_user_roles(ctx: Context = None) -> dict[str, Any]:
     """Get the roles assigned to the current user."""
     return await get_client().get_current_user_roles(get_user_token())
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Companies", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_companies(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all companies the current user belongs to.
 
@@ -339,7 +374,9 @@ async def list_all_companies(include_all_fields: bool = False, ctx: Context = No
     data = await get_client().list_all_companies(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="List Abilities", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_abilities(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all available role abilities.
 
@@ -348,7 +385,9 @@ async def list_abilities(include_all_fields: bool = False, ctx: Context = None) 
     """
     return await get_client().list_abilities(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Recurring Invoice Frequency", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_recurring_invoice_frequency(frequency: str, starts_at: str, ctx: Context = None) -> dict[str, Any]:
     """Get recurrence dates for a recurring invoice frequency.
 
@@ -358,7 +397,9 @@ async def get_recurring_invoice_frequency(frequency: str, starts_at: str, ctx: C
     """
     return await get_client().get_recurring_invoice_frequency(get_user_token(), frequency=frequency, starts_at=starts_at)
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Exchange Rate", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+)
 async def get_exchange_rate(currency_id: int = None, ctx: Context = None) -> dict[str, Any]:
     """Get exchange rate for a currency.
 
@@ -368,7 +409,9 @@ async def get_exchange_rate(currency_id: int = None, ctx: Context = None) -> dic
     currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     return await get_client().get_exchange_rate(currency_id, get_user_token())
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Active Exchange Rate Provider", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+)
 async def get_active_exchange_rate_provider(currency_id: int = None, ctx: Context = None) -> dict[str, Any]:
     """Get active exchange rate provider for a currency.
 
@@ -378,7 +421,9 @@ async def get_active_exchange_rate_provider(currency_id: int = None, ctx: Contex
     currency_id = await get_client().resolve_company_currency_id(get_user_token(), currency_id)
     return await get_client().get_active_exchange_rate_provider(currency_id, get_user_token())
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="List Used Currencies For Exchange", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+)
 async def list_used_currencies_for_exchange(include_all_fields: bool = False, provider_id: str = "", ctx: Context = None) -> dict[str, Any]:
     """List currencies used for exchange rate lookups.
 
@@ -388,7 +433,9 @@ async def list_used_currencies_for_exchange(include_all_fields: bool = False, pr
     """
     return await get_client().list_used_currencies_for_exchange(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, provider_id=provider_id)
 
-@mcp.tool(tags={"read", "advanced", "invoiceshelf"})
+@mcp.tool(
+    tags={"advanced", "invoiceshelf"}, annotations=ToolAnnotations(title="List Supported Currencies", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+)
 async def list_supported_currencies(driver: str, key: str, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List supported currencies for an exchange rate driver.
 
@@ -404,7 +451,9 @@ async def list_supported_currencies(driver: str, key: str, include_all_fields: b
 # Customers (6 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Customers", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_customers(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all customer records.
 
@@ -416,7 +465,9 @@ async def list_all_customers(include_all_fields: bool = False, page: int = 0, pa
     data = await get_client().list_all_customers(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Customer By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_customer_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single customer by ID.
 
@@ -426,7 +477,9 @@ async def get_customer_by_id(id: int, include_all_fields: bool = False, ctx: Con
     """
     return await get_client().get_customer_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Customer Roles By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_customer_roles_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Get the roles assigned to a customer.
 
@@ -435,7 +488,9 @@ async def get_customer_roles_by_id(id: int, ctx: Context = None) -> dict[str, An
     """
     return await get_client().get_customer_roles_by_id(id, get_user_token())
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Customer", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_customer(name: str, email: str, password: str = "", phone: str = "", company_name: str = "", contact_name: str = "", website: str = "", prefix: str = "", tax_id: str = "", enable_portal: bool = False, currency_id: str = "", billing: CustomerAddress = None, shipping: CustomerAddress = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new customer.
 
@@ -467,7 +522,9 @@ async def create_customer(name: str, email: str, password: str = "", phone: str 
         payload["shipping"] = shipping.model_dump(exclude_unset=True, exclude_none=True)
     return await get_client().create_customer(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Customer", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_customer(id: int, name: str = None, email: str = None, password: str = None, phone: str = None, company_name: str = None, contact_name: str = None, website: str = None, prefix: str = None, tax_id: str = None, enable_portal: bool = None, currency_id: str = None, billing: CustomerAddress = None, shipping: CustomerAddress = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing customer.
 
@@ -499,7 +556,9 @@ async def update_customer(id: int, name: str = None, email: str = None, password
         payload["shipping"] = shipping.model_dump(exclude_unset=True, exclude_none=True)
     return await get_client().update_customer(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Customers By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_customers_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a customer by ID.
 
@@ -509,7 +568,9 @@ async def delete_customers_by_id(id: int, ctx: Context = None) -> dict[str, Any]
     await get_client().delete_customers([id], get_user_token())
     return {"deleted": True, "id": id}
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Customer Stats", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_customer_stats(id: int, previous_year: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get customer statistics.
 
@@ -523,7 +584,9 @@ async def get_customer_stats(id: int, previous_year: bool = False, ctx: Context 
 # Items (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Items", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_items(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all item records.
 
@@ -535,7 +598,9 @@ async def list_all_items(include_all_fields: bool = False, page: int = 0, page_s
     data = await get_client().list_all_items(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Item By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_item_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single item by ID.
 
@@ -545,7 +610,9 @@ async def get_item_by_id(id: int, include_all_fields: bool = False, ctx: Context
     """
     return await get_client().get_item_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Item", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_item(name: str, price: float, unit_id: str = "", description: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new item.
 
@@ -562,7 +629,9 @@ async def create_item(name: str, price: float, unit_id: str = "", description: s
         payload["description"] = description
     return await get_client().create_item(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Item", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_item(id: int, name: str = None, price: float = None, unit_id: str = None, description: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing item.
 
@@ -579,7 +648,9 @@ async def update_item(id: int, name: str = None, price: float = None, unit_id: s
             payload[k] = v
     return await get_client().update_item(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Items By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_items_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete an item by ID.
 
@@ -593,7 +664,9 @@ async def delete_items_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
 # Units (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Units", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_units(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all unit records.
 
@@ -603,7 +676,9 @@ async def list_all_units(include_all_fields: bool = False, ctx: Context = None) 
     data = await get_client().list_all_units(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Unit By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_unit_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single unit by ID.
 
@@ -613,7 +688,9 @@ async def get_unit_by_id(id: int, include_all_fields: bool = False, ctx: Context
     """
     return await get_client().get_unit_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Unit", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_unit(name: str, ctx: Context = None) -> dict[str, Any]:
     """Create a new unit.
 
@@ -622,7 +699,9 @@ async def create_unit(name: str, ctx: Context = None) -> dict[str, Any]:
     """
     return await get_client().create_unit({"name": name}, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Unit", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_unit(id: int, name: str, ctx: Context = None) -> dict[str, Any]:
     """Update an existing unit.
 
@@ -632,7 +711,9 @@ async def update_unit(id: int, name: str, ctx: Context = None) -> dict[str, Any]
     """
     return await get_client().update_unit(id, {"name": name}, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Unit By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_unit_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a unit by ID.
 
@@ -646,7 +727,9 @@ async def delete_unit_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
 # Invoices (10 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Invoices", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_invoices(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all invoice records.
 
@@ -658,7 +741,9 @@ async def list_all_invoices(include_all_fields: bool = False, page: int = 0, pag
     data = await get_client().list_all_invoices(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Invoice By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_invoice_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single invoice by ID.
 
@@ -668,7 +753,9 @@ async def get_invoice_by_id(id: int, include_all_fields: bool = False, ctx: Cont
     """
     return await get_client().get_invoice_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_invoice(customer_id: int, invoice_number: str, invoice_date: str, template_name: str, items: list[InvoiceLineItem], due_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new invoice.
 
@@ -716,7 +803,9 @@ async def create_invoice(customer_id: int, invoice_number: str, invoice_date: st
         payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     return await get_client().create_invoice(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_invoice(id: int, customer_id: int = None, invoice_number: str = None, invoice_date: str = None, template_name: str = None, items: list[InvoiceLineItem] = None, due_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing invoice.
 
@@ -778,7 +867,9 @@ async def update_invoice(id: int, customer_id: int = None, invoice_number: str =
             payload["items"] = items_fallback
     return await get_client().update_invoice(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Invoices By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_invoices_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete an invoice by ID.
 
@@ -788,7 +879,9 @@ async def delete_invoices_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     await get_client().delete_invoices([id], get_user_token())
     return {"deleted": True, "id": id}
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Send Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+)
 async def send_invoice(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Send an invoice via email.
 
@@ -808,7 +901,9 @@ async def send_invoice(id: int, to: str, from_: str, subject: str, body: str, cc
         payload["bcc"] = bcc
     return await get_client().send_invoice(id, payload, get_user_token())
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Clone Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def clone_invoice(id: int, ctx: Context = None) -> dict[str, Any]:
     """Clone an invoice into a new draft.
 
@@ -817,7 +912,9 @@ async def clone_invoice(id: int, ctx: Context = None) -> dict[str, Any]:
     """
     return await get_client().clone_invoice(id, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Change Invoice Status", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def change_invoice_status(id: int, status: str, ctx: Context = None) -> dict[str, Any]:
     """Change invoice status.
 
@@ -828,7 +925,9 @@ async def change_invoice_status(id: int, status: str, ctx: Context = None) -> di
     status = ChangeInvoiceStatusEnum.coerce(status)
     return await get_client().change_invoice_status(id, {"status": status}, get_user_token())
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List Invoice Templates", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_invoice_templates(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List available invoice templates.
 
@@ -837,7 +936,9 @@ async def list_invoice_templates(include_all_fields: bool = False, ctx: Context 
     """
     return await get_client().list_invoice_templates(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Invoice Send Preview", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_invoice_send_preview(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Get invoice email preview HTML.
 
@@ -861,7 +962,9 @@ async def get_invoice_send_preview(id: int, to: str, from_: str, subject: str, b
 # Estimates (11 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Estimates", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_estimates(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all estimate records.
 
@@ -873,7 +976,9 @@ async def list_all_estimates(include_all_fields: bool = False, page: int = 0, pa
     data = await get_client().list_all_estimates(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Estimate By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_estimate_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single estimate by ID.
 
@@ -883,7 +988,9 @@ async def get_estimate_by_id(id: int, include_all_fields: bool = False, ctx: Con
     """
     return await get_client().get_estimate_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Estimate", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_estimate(customer_id: int, estimate_number: str, estimate_date: str, template_name: str, items: list[InvoiceLineItem], expiry_date: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, exchange_rate: str = "", notes: str = "", taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new estimate.
 
@@ -931,7 +1038,9 @@ async def create_estimate(customer_id: int, estimate_number: str, estimate_date:
         payload["customFields"] = [c.model_dump(exclude_unset=True) for c in custom_fields]
     return await get_client().create_estimate(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Estimate", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_estimate(id: int, customer_id: int = None, estimate_number: str = None, estimate_date: str = None, template_name: str = None, items: list[InvoiceLineItem] = None, expiry_date: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, exchange_rate: str = None, notes: str = None, taxes: list[TaxItem] = None, custom_fields: list[CustomFieldItem] = None, discount_type: str = None, tax_included: str = None, currency_id: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing estimate.
 
@@ -993,7 +1102,9 @@ async def update_estimate(id: int, customer_id: int = None, estimate_number: str
             payload["items"] = items_fallback
     return await get_client().update_estimate(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Estimates By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_estimates_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete an estimate by ID.
 
@@ -1003,7 +1114,9 @@ async def delete_estimates_by_id(id: int, ctx: Context = None) -> dict[str, Any]
     await get_client().delete_estimates([id], get_user_token())
     return {"deleted": True, "id": id}
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Send Estimate", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+)
 async def send_estimate(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Send an estimate via email.
 
@@ -1023,7 +1136,9 @@ async def send_estimate(id: int, to: str, from_: str, subject: str, body: str, c
         payload["bcc"] = bcc
     return await get_client().send_estimate(id, payload, get_user_token())
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Clone Estimate", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def clone_estimate(id: int, ctx: Context = None) -> dict[str, Any]:
     """Clone an estimate into a new draft.
 
@@ -1032,7 +1147,9 @@ async def clone_estimate(id: int, ctx: Context = None) -> dict[str, Any]:
     """
     return await get_client().clone_estimate(id, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Change Estimate Status", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def change_estimate_status(id: int, status: str, ctx: Context = None) -> dict[str, Any]:
     """Change estimate status.
 
@@ -1043,7 +1160,9 @@ async def change_estimate_status(id: int, status: str, ctx: Context = None) -> d
     status = ChangeEstimateStatusEnum.coerce(status)
     return await get_client().change_estimate_status(id, {"status": status}, get_user_token())
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Convert Estimate To Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def convert_estimate_to_invoice(id: int, ctx: Context = None) -> dict[str, Any]:
     """Convert an estimate to an invoice.
 
@@ -1052,7 +1171,9 @@ async def convert_estimate_to_invoice(id: int, ctx: Context = None) -> dict[str,
     """
     return await get_client().convert_estimate_to_invoice(id, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List Estimate Templates", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_estimate_templates(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List available estimate templates.
 
@@ -1061,7 +1182,9 @@ async def list_estimate_templates(include_all_fields: bool = False, ctx: Context
     """
     return await get_client().list_estimate_templates(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Estimate Send Preview", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_estimate_send_preview(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Get estimate email preview HTML.
 
@@ -1085,7 +1208,9 @@ async def get_estimate_send_preview(id: int, to: str, from_: str, subject: str, 
 # Expenses (6 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Expenses", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_expenses(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all expense records.
 
@@ -1097,7 +1222,9 @@ async def list_all_expenses(include_all_fields: bool = False, page: int = 0, pag
     data = await get_client().list_all_expenses(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Expense By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_expense_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single expense by ID.
 
@@ -1107,7 +1234,9 @@ async def get_expense_by_id(id: int, include_all_fields: bool = False, ctx: Cont
     """
     return await get_client().get_expense_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Expense", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_expense(expense_date: str, expense_category_id: int, amount: float, currency_id: int = None, expense_number: str = "", payment_method_id: str = "", customer_id: str = "", notes: str = "", exchange_rate: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new expense.
 
@@ -1129,7 +1258,9 @@ async def create_expense(expense_date: str, expense_category_id: int, amount: fl
             payload[k] = v
     return await get_client().create_expense(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Expense", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_expense(id: int, expense_date: str = None, expense_category_id: int = None, amount: float = None, currency_id: int = None, expense_number: str = None, payment_method_id: str = None, customer_id: str = None, notes: str = None, exchange_rate: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing expense.
 
@@ -1155,7 +1286,9 @@ async def update_expense(id: int, expense_date: str = None, expense_category_id:
         payload["exchange_rate"] = "1"
     return await get_client().update_expense(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Expenses By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_expenses_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete an expense by ID.
 
@@ -1165,7 +1298,9 @@ async def delete_expenses_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     await get_client().delete_expenses([id], get_user_token())
     return {"deleted": True, "id": id}
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Duplicate Expense", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def duplicate_expense(id: int, expense_date: str, ctx: Context = None) -> dict[str, Any]:
     """Duplicate an expense with a new date.
 
@@ -1179,7 +1314,9 @@ async def duplicate_expense(id: int, expense_date: str, ctx: Context = None) -> 
 # Expense Categories (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Expense Categories", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_expense_categories(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all expense categories.
 
@@ -1189,7 +1326,9 @@ async def list_all_expense_categories(include_all_fields: bool = False, ctx: Con
     data = await get_client().list_all_expense_categories(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Expense Category By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_expense_category_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single expense category by ID.
 
@@ -1199,7 +1338,9 @@ async def get_expense_category_by_id(id: int, include_all_fields: bool = False, 
     """
     return await get_client().get_expense_category_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Expense Category", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_expense_category(name: str, description: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new expense category.
 
@@ -1212,7 +1353,9 @@ async def create_expense_category(name: str, description: str = "", ctx: Context
         payload["description"] = description
     return await get_client().create_expense_category(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Expense Category", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_expense_category(id: int, name: str = None, description: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing expense category.
 
@@ -1227,7 +1370,9 @@ async def update_expense_category(id: int, name: str = None, description: str = 
             payload[k] = v
     return await get_client().update_expense_category(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Expense Category By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_expense_category_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete an expense category by ID.
 
@@ -1241,7 +1386,9 @@ async def delete_expense_category_by_id(id: int, ctx: Context = None) -> dict[st
 # Payments (7 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Payments", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_payments(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all payment records.
 
@@ -1253,7 +1400,9 @@ async def list_all_payments(include_all_fields: bool = False, page: int = 0, pag
     data = await get_client().list_all_payments(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Payment By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_payment_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single payment by ID.
 
@@ -1263,7 +1412,9 @@ async def get_payment_by_id(id: int, include_all_fields: bool = False, ctx: Cont
     """
     return await get_client().get_payment_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Payment", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_payment(payment_date: str, customer_id: int, amount: float, payment_number: str, invoice_id: str = "", payment_method_id: str = "", notes: str = "", currency_id: str = "", exchange_rate: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new payment.
 
@@ -1285,7 +1436,9 @@ async def create_payment(payment_date: str, customer_id: int, amount: float, pay
             payload[k] = v
     return await get_client().create_payment(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Payment", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_payment(id: int, payment_date: str = None, customer_id: int = None, amount: float = None, payment_number: str = None, invoice_id: str = None, payment_method_id: str = None, notes: str = None, currency_id: str = None, exchange_rate: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing payment.
 
@@ -1311,7 +1464,9 @@ async def update_payment(id: int, payment_date: str = None, customer_id: int = N
         payload["currency_id"] = await get_client().resolve_company_currency_id(get_user_token())
     return await get_client().update_payment(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Payments By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_payments_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a payment by ID.
 
@@ -1321,7 +1476,9 @@ async def delete_payments_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     await get_client().delete_payments([id], get_user_token())
     return {"deleted": True, "id": id}
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Send Payment", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+)
 async def send_payment(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Send a payment receipt via email.
 
@@ -1341,7 +1498,9 @@ async def send_payment(id: int, to: str, from_: str, subject: str, body: str, cc
         payload["bcc"] = bcc
     return await get_client().send_payment(id, payload, get_user_token())
 
-@mcp.tool(tags={"read", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Payment Send Preview", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_payment_send_preview(id: int, to: str, from_: str, subject: str, body: str, cc: str = "", bcc: str = "", ctx: Context = None) -> dict[str, Any]:
     """Get payment email preview HTML.
 
@@ -1365,7 +1524,9 @@ async def get_payment_send_preview(id: int, to: str, from_: str, subject: str, b
 # Payment Methods (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Payment Methods", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_payment_methods(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all payment method records.
 
@@ -1375,7 +1536,9 @@ async def list_all_payment_methods(include_all_fields: bool = False, ctx: Contex
     data = await get_client().list_all_payment_methods(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Payment Method By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_payment_method_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single payment method by ID.
 
@@ -1385,7 +1548,9 @@ async def get_payment_method_by_id(id: int, include_all_fields: bool = False, ct
     """
     return await get_client().get_payment_method_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Payment Method", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_payment_method(name: str, ctx: Context = None) -> dict[str, Any]:
     """Create a new payment method.
 
@@ -1394,7 +1559,9 @@ async def create_payment_method(name: str, ctx: Context = None) -> dict[str, Any
     """
     return await get_client().create_payment_method({"name": name}, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Payment Method", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_payment_method(id: int, name: str, ctx: Context = None) -> dict[str, Any]:
     """Update an existing payment method.
 
@@ -1404,7 +1571,9 @@ async def update_payment_method(id: int, name: str, ctx: Context = None) -> dict
     """
     return await get_client().update_payment_method(id, {"name": name}, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Payment Method By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_payment_method_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a payment method by ID.
 
@@ -1418,7 +1587,9 @@ async def delete_payment_method_by_id(id: int, ctx: Context = None) -> dict[str,
 # Custom Fields (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Custom Fields", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_custom_fields(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all custom field records.
 
@@ -1428,7 +1599,9 @@ async def list_all_custom_fields(include_all_fields: bool = False, ctx: Context 
     data = await get_client().list_all_custom_fields(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Custom Field By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_custom_field_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single custom field by ID.
 
@@ -1438,7 +1611,9 @@ async def get_custom_field_by_id(id: int, include_all_fields: bool = False, ctx:
     """
     return await get_client().get_custom_field_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Custom Field", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_custom_field(name: str, label: str, model_type: str, order: int, type: str, is_required: bool, options: str = "", placeholder: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new custom field.
 
@@ -1460,7 +1635,9 @@ async def create_custom_field(name: str, label: str, model_type: str, order: int
             payload[k] = v
     return await get_client().create_custom_field(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Custom Field", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_custom_field(id: int, name: str = None, label: str = None, model_type: str = None, order: int = None, type: str = None, is_required: bool = None, options: str = None, placeholder: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing custom field.
 
@@ -1484,7 +1661,9 @@ async def update_custom_field(id: int, name: str = None, label: str = None, mode
             payload[k] = v
     return await get_client().update_custom_field(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Custom Field By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_custom_field_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a custom field by ID.
 
@@ -1498,7 +1677,9 @@ async def delete_custom_field_by_id(id: int, ctx: Context = None) -> dict[str, A
 # Tax Types (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Tax Types", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_tax_types(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all tax type records.
 
@@ -1508,7 +1689,9 @@ async def list_all_tax_types(include_all_fields: bool = False, ctx: Context = No
     data = await get_client().list_all_tax_types(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Tax Type By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_tax_type_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single tax type by ID.
 
@@ -1518,7 +1701,9 @@ async def get_tax_type_by_id(id: int, include_all_fields: bool = False, ctx: Con
     """
     return await get_client().get_tax_type_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Tax Type", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_tax_type(name: str, calculation_type: str, percent: str = "", fixed_amount: str = "", description: str = "", compound_tax: str = None, collective_tax: str = None, ctx: Context = None) -> dict[str, Any]:
     """Create a new tax type.
 
@@ -1540,7 +1725,9 @@ async def create_tax_type(name: str, calculation_type: str, percent: str = "", f
             payload[k] = v
     return await get_client().create_tax_type(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Tax Type", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_tax_type(id: int, name: str = None, calculation_type: str = None, percent: str = None, fixed_amount: str = None, description: str = None, compound_tax: str = None, collective_tax: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing tax type.
 
@@ -1563,7 +1750,9 @@ async def update_tax_type(id: int, name: str = None, calculation_type: str = Non
             payload[k] = v
     return await get_client().update_tax_type(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Tax Type By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_tax_type_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a tax type by ID.
 
@@ -1577,7 +1766,9 @@ async def delete_tax_type_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
 # Notes (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Notes", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_notes(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all note records.
 
@@ -1587,7 +1778,9 @@ async def list_all_notes(include_all_fields: bool = False, ctx: Context = None) 
     data = await get_client().list_all_notes(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Note By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_note_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single note by ID.
 
@@ -1597,7 +1790,9 @@ async def get_note_by_id(id: int, include_all_fields: bool = False, ctx: Context
     """
     return await get_client().get_note_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Note", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_note(type: str, name: str, notes: str, is_default: bool, ctx: Context = None) -> dict[str, Any]:
     """Create a new note.
 
@@ -1611,7 +1806,9 @@ async def create_note(type: str, name: str, notes: str, is_default: bool, ctx: C
     payload = {"type": type, "name": name, "notes": notes, "is_default": is_default}
     return await get_client().create_note(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Note", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_note(id: int, type: str = None, name: str = None, notes: str = None, is_default: bool = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing note.
 
@@ -1629,7 +1826,9 @@ async def update_note(id: int, type: str = None, name: str = None, notes: str = 
             payload[k] = v
     return await get_client().update_note(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Note By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_note_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a note by ID.
 
@@ -1643,7 +1842,9 @@ async def delete_note_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
 # Recurring Invoices (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Recurring Invoices", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_recurring_invoices(include_all_fields: bool = False, page: int = 0, page_size: int = 10, ctx: Context = None) -> dict[str, Any]:
     """List all recurring invoice records.
 
@@ -1655,7 +1856,9 @@ async def list_all_recurring_invoices(include_all_fields: bool = False, page: in
     data = await get_client().list_all_recurring_invoices(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False, page=page, page_size=page_size)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Recurring Invoice By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_recurring_invoice_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single recurring invoice by ID.
 
@@ -1665,7 +1868,9 @@ async def get_recurring_invoice_by_id(id: int, include_all_fields: bool = False,
     """
     return await get_client().get_recurring_invoice_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Recurring Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: str, status: str, limit_by: str, send_automatically: bool, items: list[InvoiceLineItem], limit_count: str = "", limit_date: str = "", exchange_rate: str = "", discount: float = 0, discount_val: int = 0, sub_total: float = 0, total: float = 0, tax: float = 0, taxes: list[TaxItem] = None, currency_id: str = "", notes: str = "", ctx: Context = None) -> dict[str, Any]:
     """Create a new recurring invoice template.
 
@@ -1710,7 +1915,9 @@ async def create_recurring_invoice(customer_id: int, starts_at: str, frequency: 
         payload["taxes"] = [t.model_dump(exclude_unset=True) for t in taxes]
     return await get_client().create_recurring_invoice(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Recurring Invoice", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: str = None, frequency: str = None, status: str = None, limit_by: str = None, send_automatically: bool = None, items: list[InvoiceLineItem] = None, limit_count: str = None, limit_date: str = None, exchange_rate: str = None, discount: float = None, discount_val: int = None, sub_total: float = None, total: float = None, tax: float = None, taxes: list[TaxItem] = None, currency_id: str = None, notes: str = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing recurring invoice.
 
@@ -1769,7 +1976,9 @@ async def update_recurring_invoice(id: int, customer_id: int = None, starts_at: 
             payload["items"] = items_fallback
     return await get_client().update_recurring_invoice(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Recurring Invoices By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_recurring_invoices_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a recurring invoice by ID.
 
@@ -1783,7 +1992,9 @@ async def delete_recurring_invoices_by_id(id: int, ctx: Context = None) -> dict[
 # Roles (5 tools)
 # =============================================================================
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="List All Roles", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def list_all_roles(include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """List all role records.
 
@@ -1793,7 +2004,9 @@ async def list_all_roles(include_all_fields: bool = False, ctx: Context = None) 
     data = await get_client().list_all_roles(get_user_token(), include_all_fields=include_all_fields if ALLOW_ALL_AGGREGATE else False)
     return {"items": json_to_toon(data)}
 
-@mcp.tool(tags={"read", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Get Role By Id", readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def get_role_by_id(id: int, include_all_fields: bool = False, ctx: Context = None) -> dict[str, Any]:
     """Get a single role by ID.
 
@@ -1803,7 +2016,9 @@ async def get_role_by_id(id: int, include_all_fields: bool = False, ctx: Context
     """
     return await get_client().get_role_by_id(id, get_user_token(), include_all_fields=include_all_fields)
 
-@mcp.tool(tags={"write", "basic", "invoiceshelf"})
+@mcp.tool(
+    tags={"basic", "invoiceshelf"}, annotations=ToolAnnotations(title="Create Role", readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+)
 async def create_role(name: str, abilities: list[RoleAbility], ctx: Context = None) -> dict[str, Any]:
     """Create a new role with abilities.
 
@@ -1814,7 +2029,9 @@ async def create_role(name: str, abilities: list[RoleAbility], ctx: Context = No
     payload = {"name": name, "abilities": [{"ability": a.ability} for a in abilities]}
     return await get_client().create_role(payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Update Role", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+)
 async def update_role(id: int, name: str = None, abilities: list[RoleAbility] = None, ctx: Context = None) -> dict[str, Any]:
     """Update an existing role.
 
@@ -1830,7 +2047,9 @@ async def update_role(id: int, name: str = None, abilities: list[RoleAbility] = 
         payload["abilities"] = [{"ability": a.ability} for a in abilities]
     return await get_client().update_role(id, payload, get_user_token(), include_all_fields=ALLOW_ALL_AGGREGATE)
 
-@mcp.tool(tags={"write", "primary", "invoiceshelf"})
+@mcp.tool(
+    tags={"primary", "invoiceshelf"}, annotations=ToolAnnotations(title="Delete Role By Id", readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+)
 async def delete_role_by_id(id: int, ctx: Context = None) -> dict[str, Any]:
     """Delete a role by ID.
 
